@@ -10,6 +10,15 @@ android {
     namespace = "com.canon.cr3transfer"
     compileSdk = 36
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../release.jks")
+            storePassword = "cr3transfer2026"
+            keyAlias = "cr3transfer"
+            keyPassword = "cr3transfer2026"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.canon.cr3transfer"
         minSdk = 26
@@ -23,6 +32,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
