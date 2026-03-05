@@ -10,10 +10,12 @@ import com.canon.cr3transfer.domain.model.Cr3File
 import com.canon.cr3transfer.domain.model.TransferState
 import com.canon.cr3transfer.domain.usecase.ScanCameraUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -26,31 +28,42 @@ class MainViewModel @Inject constructor(
     val state: StateFlow<TransferState> = _state.asStateFlow()
 
     private var scannedFiles: List<Cr3File> = emptyList()
+    private var isConnecting = false
 
     val files: List<Cr3File> get() = scannedFiles
 
     fun onCameraConnected(usbDevice: UsbDevice) {
         val currentState = _state.value
-        // Don't reconnect if already connected or transferring
+        if (isConnecting) {
+            android.util.Log.d("CR3Transfer", "onCameraConnected: skipping, already connecting")
+            return
+        }
         if (deviceManager.isConnected &&
             (currentState is TransferState.CameraConnected ||
              currentState is TransferState.Scanning ||
              currentState is TransferState.Transferring)) {
+            android.util.Log.d("CR3Transfer", "onCameraConnected: skipping, already connected/active state=$currentState")
             return
         }
 
+        isConnecting = true
         viewModelScope.launch {
-            val opened = deviceManager.open(usbDevice)
-            if (!opened) {
-                _state.value = TransferState.Error(
-                    message = "Could not open camera. Check USB mode setting.",
-                    isCameraSetupError = true,
-                )
-                return@launch
+            try {
+                android.util.Log.d("CR3Transfer", "onCameraConnected: opening MTP device...")
+                val opened = withContext(Dispatchers.IO) { deviceManager.open(usbDevice) }
+                android.util.Log.d("CR3Transfer", "onCameraConnected: open result=$opened")
+                if (!opened) {
+                    _state.value = TransferState.Error(
+                        message = "Could not open camera. Check USB mode setting.",
+                        isCameraSetupError = true,
+                    )
+                    return@launch
+                }
+                _state.value = TransferState.CameraConnected
+                scanCamera()
+            } finally {
+                isConnecting = false
             }
-            _state.value = TransferState.CameraConnected
-            // Auto-scan for CR3 files when camera connects
-            scanCamera()
         }
     }
 

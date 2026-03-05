@@ -77,7 +77,7 @@ private fun IdleContent() {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "Canon EOS R8",
+                text = "Canon CR3 Transfer",
                 style = MaterialTheme.typography.headlineMedium,
             )
             Spacer(modifier = Modifier.height(8.dp))

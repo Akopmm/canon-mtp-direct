@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">CR3 Transfer</string>
-    <string name="connect_prompt">Connect your EOS R8 via USB-C</string>
+    <string name="connect_prompt">Connect your Canon EOS R camera via USB-C</string>
     <string name="start_transfer">Start Transfer</string>
     <string name="scanning">Scanning camera…</string>
     <string name="transfer_notification_channel">Transfer Progress</string>
@@ -11,8 +11,8 @@
     <string name="open_folder">Open Folder</string>
     <string name="not_enough_storage">Not enough storage. Need %1$s, available %2$s</string>
     <string name="camera_setup_title">Camera Setup Required</string>
-    <string name="camera_setup_instruction">On your Canon EOS R8, go to:\nMenu → Communication settings → Choose USB connection app → Photo Import/Remote Control</string>
+    <string name="camera_setup_instruction">On your Canon camera, go to:\nMenu → Communication settings → Choose USB connection app → Photo Import/Remote Control</string>
     <string name="auto_power_off_warning">Tip: Set Auto power off to Disable on your camera during transfer</string>
     <string name="try_reconnecting">Could not read camera storage. Try unplugging and reconnecting.</string>
-    <string name="unknown_canon_model">This Canon model may not be supported. This app is designed for the EOS R8.</string>
+    <string name="unknown_canon_model">This Canon model may not be supported. This app is designed for Canon EOS R cameras.</string>
 </resources>
