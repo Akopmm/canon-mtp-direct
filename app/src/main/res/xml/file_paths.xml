@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-path
+        name="dcim"
+        path="DCIM/CanonImports" />
+    <external-files-path
+        name="app_imports"
+        path="CanonImports" />
+</paths>
