@@ -37,6 +37,10 @@ class MtpDeviceManager @Inject constructor(
         return if (ids != null && ids.isNotEmpty()) ids[0] else null
     }
 
+    fun getThumbnail(objectHandle: Int): ByteArray? {
+        return mtpDevice?.getThumbnail(objectHandle)
+    }
+
     fun close() {
         mtpDevice?.close()
         mtpDevice = null

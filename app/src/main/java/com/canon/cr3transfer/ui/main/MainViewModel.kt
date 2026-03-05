@@ -27,10 +27,21 @@ class MainViewModel @Inject constructor(
     private val _state = MutableStateFlow<TransferState>(TransferState.Idle)
     val state: StateFlow<TransferState> = _state.asStateFlow()
 
+    private val _thumbnails = MutableStateFlow<Map<Int, ByteArray>>(emptyMap())
+    val thumbnails: StateFlow<Map<Int, ByteArray>> = _thumbnails.asStateFlow()
+
     private var scannedFiles: List<Cr3File> = emptyList()
     private var isConnecting = false
 
     val files: List<Cr3File> get() = scannedFiles
+
+    fun selectedFiles(): List<Cr3File> {
+        val state = _state.value
+        if (state is TransferState.FilePicker) {
+            return scannedFiles.filter { it.objectHandle in state.selectedHandles }
+        }
+        return scannedFiles
+    }
 
     fun onCameraConnected(usbDevice: UsbDevice) {
         val currentState = _state.value
@@ -41,6 +52,7 @@ class MainViewModel @Inject constructor(
         if (deviceManager.isConnected &&
             (currentState is TransferState.CameraConnected ||
              currentState is TransferState.Scanning ||
+             currentState is TransferState.FilePicker ||
              currentState is TransferState.Transferring)) {
             android.util.Log.d("CR3Transfer", "onCameraConnected: skipping, already connected/active state=$currentState")
             return
@@ -70,6 +82,7 @@ class MainViewModel @Inject constructor(
     fun onCameraDisconnected() {
         deviceManager.close()
         scannedFiles = emptyList()
+        _thumbnails.value = emptyMap()
         _state.value = TransferState.Idle
     }
 
@@ -82,22 +95,76 @@ class MainViewModel @Inject constructor(
                     _state.value = TransferState.Done(transferred = 0, skipped = 0, failed = 0)
                     return@launch
                 }
-                val requiredBytes = scannedFiles.sumOf { it.sizeBytes }
-                val stat = StatFs(Environment.getExternalStorageDirectory().path)
-                val availableBytes = stat.availableBytes
-                if (requiredBytes > availableBytes) {
-                    _state.value = TransferState.Error(
-                        message = "Not enough storage. Need ${formatSize(requiredBytes)}, available ${formatSize(availableBytes)}",
-                    )
-                    return@launch
-                }
-                _state.value = TransferState.CameraConnected
+                // Go to file picker with all files selected by default
+                val allHandles = scannedFiles.map { it.objectHandle }.toSet()
+                _state.value = TransferState.FilePicker(
+                    files = scannedFiles,
+                    selectedHandles = allHandles,
+                )
+                // Load thumbnails lazily in background
+                loadThumbnails(scannedFiles)
             } catch (e: Exception) {
                 _state.value = TransferState.Error(
                     message = e.message ?: "Failed to scan camera",
                 )
             }
         }
+    }
+
+    private fun loadThumbnails(files: List<Cr3File>) {
+        viewModelScope.launch {
+            for (file in files) {
+                val thumb = withContext(Dispatchers.IO) {
+                    deviceManager.getThumbnail(file.objectHandle)
+                }
+                if (thumb != null) {
+                    _thumbnails.value = _thumbnails.value + (file.objectHandle to thumb)
+                }
+            }
+        }
+    }
+
+    fun toggleFileSelection(objectHandle: Int) {
+        val current = _state.value
+        if (current is TransferState.FilePicker) {
+            val newSelected = if (objectHandle in current.selectedHandles) {
+                current.selectedHandles - objectHandle
+            } else {
+                current.selectedHandles + objectHandle
+            }
+            _state.value = current.copy(selectedHandles = newSelected)
+        }
+    }
+
+    fun selectAll() {
+        val current = _state.value
+        if (current is TransferState.FilePicker) {
+            _state.value = current.copy(
+                selectedHandles = current.files.map { it.objectHandle }.toSet()
+            )
+        }
+    }
+
+    fun selectNone() {
+        val current = _state.value
+        if (current is TransferState.FilePicker) {
+            _state.value = current.copy(selectedHandles = emptySet())
+        }
+    }
+
+    fun checkStorageAndProceed(): Boolean {
+        val selected = selectedFiles()
+        if (selected.isEmpty()) return false
+        val requiredBytes = selected.sumOf { it.sizeBytes }
+        val stat = StatFs(Environment.getExternalStorageDirectory().path)
+        val availableBytes = stat.availableBytes
+        if (requiredBytes > availableBytes) {
+            _state.value = TransferState.Error(
+                message = "Not enough storage. Need ${formatSize(requiredBytes)}, available ${formatSize(availableBytes)}",
+            )
+            return false
+        }
+        return true
     }
 
     fun updateState(newState: TransferState) {

@@ -4,6 +4,10 @@ sealed interface TransferState {
     data object Idle : TransferState
     data object CameraConnected : TransferState
     data object Scanning : TransferState
+    data class FilePicker(
+        val files: List<Cr3File>,
+        val selectedHandles: Set<Int>,
+    ) : TransferState
 
     data class Transferring(
         val totalFiles: Int,

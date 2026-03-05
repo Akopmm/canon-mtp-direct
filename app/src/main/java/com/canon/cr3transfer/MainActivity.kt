@@ -197,7 +197,7 @@ class MainActivity : ComponentActivity() {
     private var pendingTransferFiles: List<com.canon.cr3transfer.domain.model.Cr3File>? = null
 
     private fun startTransfer() {
-        val files = viewModel.files
+        val files = viewModel.selectedFiles()
         if (files.isEmpty()) {
             Log.w(TAG, "startTransfer called with no files")
             return
