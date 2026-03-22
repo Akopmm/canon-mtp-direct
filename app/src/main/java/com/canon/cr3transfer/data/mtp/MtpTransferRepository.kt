@@ -1,13 +1,10 @@
 package com.canon.cr3transfer.data.mtp
 
-import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.mtp.MtpDevice
 import android.os.Environment
-import android.provider.MediaStore
 import android.util.Log
-import com.canon.cr3transfer.data.prefs.TransferHistoryDataStore
 import com.canon.cr3transfer.domain.model.Cr3File
 import com.canon.cr3transfer.domain.model.FileStatus
 import com.canon.cr3transfer.domain.model.FileTransferStatus
@@ -36,8 +33,10 @@ data class TransferProgress(
 @Singleton
 class MtpTransferRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val history: TransferHistoryDataStore,
 ) {
+    /** Returns true if a file with this name already exists anywhere under CanonImports/. */
+    fun isAlreadyImported(fileName: String): Boolean =
+        outputDirectory.walkTopDown().any { it.isFile && it.name == fileName }
     fun transferFiles(
         device: MtpDevice,
         files: List<Cr3File>,
@@ -58,8 +57,8 @@ class MtpTransferRepository @Inject constructor(
 
         for ((index, file) in files.withIndex()) {
             val destFile = File(destDir, file.name)
-            val alreadyTransferred = destFile.exists() && destFile.length() == file.sizeBytes
-            Log.d(TAG, "File ${file.name}: exists=${destFile.exists()} expectedSize=${file.sizeBytes} actualSize=${if (destFile.exists()) destFile.length() else 0} skip=$alreadyTransferred")
+            val alreadyTransferred = isAlreadyImported(file.name)
+            Log.d(TAG, "File ${file.name}: alreadyImported=$alreadyTransferred")
 
             if (alreadyTransferred) {
                 statuses[index] = statuses[index].copy(status = FileStatus.SKIPPED)

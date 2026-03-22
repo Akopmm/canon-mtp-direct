@@ -6,6 +6,7 @@ import android.os.StatFs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.canon.cr3transfer.data.mtp.MtpDeviceManager
+import com.canon.cr3transfer.data.mtp.MtpTransferRepository
 import com.canon.cr3transfer.domain.model.Cr3File
 import com.canon.cr3transfer.domain.model.TransferState
 import com.canon.cr3transfer.domain.usecase.ScanCameraUseCase
@@ -22,6 +23,7 @@ import javax.inject.Inject
 class MainViewModel @Inject constructor(
     private val deviceManager: MtpDeviceManager,
     private val scanCameraUseCase: ScanCameraUseCase,
+    private val transferRepository: MtpTransferRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<TransferState>(TransferState.Idle)
@@ -95,11 +97,16 @@ class MainViewModel @Inject constructor(
                     _state.value = TransferState.Done(transferred = 0, skipped = 0, failed = 0)
                     return@launch
                 }
-                // Go to file picker with all files selected by default
-                val allHandles = scannedFiles.map { it.objectHandle }.toSet()
+                // Pre-select only files not yet on disk; user can still manually pick others
+                val newHandles = withContext(Dispatchers.IO) {
+                    scannedFiles
+                        .filter { !transferRepository.isAlreadyImported(it.name) }
+                        .map { it.objectHandle }
+                        .toSet()
+                }
                 _state.value = TransferState.FilePicker(
                     files = scannedFiles,
-                    selectedHandles = allHandles,
+                    selectedHandles = newHandles,
                 )
                 // Load thumbnails lazily in background
                 loadThumbnails(scannedFiles)
