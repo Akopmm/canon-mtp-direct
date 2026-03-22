@@ -20,28 +20,38 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,11 +65,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.canon.cr3transfer.R
-import com.canon.cr3transfer.domain.model.Cr3File
+import com.canon.cr3transfer.domain.model.CameraFile
+import com.canon.cr3transfer.domain.model.FileType
 import com.canon.cr3transfer.domain.model.TransferState
 import com.canon.cr3transfer.ui.components.CameraSetupGuide
 import com.canon.cr3transfer.ui.components.FileProgressItem
 import com.canon.cr3transfer.ui.components.OverallProgressBar
+import com.canon.cr3transfer.ui.components.TransferHistorySheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,10 +81,19 @@ fun MainScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val thumbnails by viewModel.thumbnails.collectAsState()
+    val showHistory by viewModel.showHistory.collectAsState()
+    val sessionHistory by viewModel.sessionHistory.collectAsState()
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(stringResource(R.string.app_name)) })
+            TopAppBar(
+                title = { Text(stringResource(R.string.app_name)) },
+                actions = {
+                    IconButton(onClick = { viewModel.openHistory() }) {
+                        Icon(Icons.Filled.List, contentDescription = "Transfer History")
+                    }
+                },
+            )
         },
     ) { padding ->
         Box(
@@ -90,10 +111,9 @@ fun MainScreen(
                     onToggleFile = { viewModel.toggleFileSelection(it) },
                     onSelectAll = { viewModel.selectAll() },
                     onSelectNone = { viewModel.selectNone() },
+                    onToggleDeleteMode = { viewModel.toggleDeleteAfterTransfer() },
                     onStartTransfer = {
-                        if (viewModel.checkStorageAndProceed()) {
-                            onStartTransfer()
-                        }
+                        if (viewModel.checkStorageAndProceed()) onStartTransfer()
                     },
                 )
                 is TransferState.Transferring -> TransferringContent(currentState)
@@ -101,20 +121,23 @@ fun MainScreen(
                 is TransferState.Error -> ErrorContent(currentState)
             }
         }
+
+        if (showHistory) {
+            ModalBottomSheet(
+                onDismissRequest = { viewModel.closeHistory() },
+                sheetState = rememberModalBottomSheetState(),
+            ) {
+                TransferHistorySheet(sessions = sessionHistory)
+            }
+        }
     }
 }
 
 @Composable
 private fun IdleContent() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "Canon CR3 Transfer",
-                style = MaterialTheme.typography.headlineMedium,
-            )
+            Text("Canon CR3 Transfer", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = stringResource(R.string.connect_prompt),
@@ -127,38 +150,27 @@ private fun IdleContent() {
 
 @Composable
 private fun CameraConnectedContent() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "Camera Connected",
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            Text("Camera Connected", style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
 
 @Composable
 private fun ScanningContent() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = stringResource(R.string.scanning),
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            Text(stringResource(R.string.scanning), style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FilePickerContent(
     state: TransferState.FilePicker,
@@ -166,47 +178,82 @@ private fun FilePickerContent(
     onToggleFile: (Int) -> Unit,
     onSelectAll: () -> Unit,
     onSelectNone: () -> Unit,
+    onToggleDeleteMode: () -> Unit,
     onStartTransfer: () -> Unit,
 ) {
     val selectedCount = state.selectedHandles.size
     val totalCount = state.files.size
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete files from camera?") },
+            text = {
+                Text("After each file is successfully transferred, it will be permanently deleted from the camera's SD card. This cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onStartTransfer()
+                }) { Text("Delete & Transfer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Header with selection controls
+        // Selection controls row
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "$selectedCount / $totalCount selected",
-                style = MaterialTheme.typography.titleSmall,
-            )
+            Text("$selectedCount / $totalCount selected", style = MaterialTheme.typography.titleSmall)
             Row {
                 TextButton(onClick = onSelectAll) { Text("All") }
                 TextButton(onClick = onSelectNone) { Text("None") }
             }
         }
 
+        // SD card free space
+        state.cameraFreeBytes?.let { freeBytes ->
+            Text(
+                text = formatBytes(freeBytes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp),
+            )
+        }
+
+        HorizontalDivider()
+
+        // Delete toggle
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Delete from camera after transfer", style = MaterialTheme.typography.bodyMedium)
+            Switch(checked = state.deleteAfterTransfer, onCheckedChange = { onToggleDeleteMode() })
+        }
+
+        HorizontalDivider()
+
         // Thumbnail grid
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 8.dp),
+            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             items(state.files, key = { it.objectHandle }) { file ->
-                val isSelected = file.objectHandle in state.selectedHandles
-                val thumbData = thumbnails[file.objectHandle]
-
-                PhotoThumbnail(
+                FileThumbnail(
                     file = file,
-                    thumbnailData = thumbData,
-                    isSelected = isSelected,
+                    thumbnailData = thumbnails[file.objectHandle],
+                    isSelected = file.objectHandle in state.selectedHandles,
                     onClick = { onToggleFile(file.objectHandle) },
                 )
             }
@@ -214,11 +261,12 @@ private fun FilePickerContent(
 
         // Transfer button
         Button(
-            onClick = onStartTransfer,
+            onClick = {
+                if (state.deleteAfterTransfer) showDeleteConfirm = true
+                else onStartTransfer()
+            },
             enabled = selectedCount > 0,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
         ) {
             Text("Transfer $selectedCount ${if (selectedCount == 1) "file" else "files"}")
         }
@@ -226,8 +274,8 @@ private fun FilePickerContent(
 }
 
 @Composable
-private fun PhotoThumbnail(
-    file: Cr3File,
+private fun FileThumbnail(
+    file: CameraFile,
     thumbnailData: ByteArray?,
     isSelected: Boolean,
     onClick: () -> Unit,
@@ -254,10 +302,20 @@ private fun PhotoThumbnail(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                PlaceholderThumbnail(file.name)
+                PlaceholderThumbnail(file.fileType)
             }
         } else {
-            PlaceholderThumbnail(file.name)
+            PlaceholderThumbnail(file.fileType)
+        }
+
+        // Video play icon overlay
+        if (file.fileType == FileType.MP4) {
+            Icon(
+                imageVector = Icons.Filled.PlayArrow,
+                contentDescription = "Video",
+                tint = Color.White.copy(alpha = 0.9f),
+                modifier = Modifier.align(Alignment.Center).size(32.dp),
+            )
         }
 
         // Selection indicator
@@ -292,15 +350,13 @@ private fun PhotoThumbnail(
 }
 
 @Composable
-private fun PlaceholderThumbnail(name: String) {
+private fun PlaceholderThumbnail(fileType: FileType) {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "CR3",
+            text = if (fileType == FileType.MP4) "MP4" else "CR3",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -326,10 +382,7 @@ private fun TransferringContent(state: TransferState.Transferring) {
 @Composable
 private fun DoneContent(state: TransferState.Done) {
     val context = LocalContext.current
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(16.dp),
@@ -340,10 +393,7 @@ private fun DoneContent(state: TransferState.Done) {
             )
             if (state.failed > 0) {
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "${state.failed} files failed",
-                    color = MaterialTheme.colorScheme.error,
-                )
+                Text("${state.failed} files failed", color = MaterialTheme.colorScheme.error)
             }
             Spacer(modifier = Modifier.height(16.dp))
             Button(onClick = {
@@ -416,9 +466,7 @@ private fun DoneContent(state: TransferState.Done) {
 @Composable
 private fun ErrorContent(state: TransferState.Error) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -432,4 +480,10 @@ private fun ErrorContent(state: TransferState.Error) {
             CameraSetupGuide()
         }
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    val gb = bytes / (1024.0 * 1024.0 * 1024.0)
+    return if (gb >= 1.0) String.format("%.1f GB free on camera SD", gb)
+    else String.format("%.0f MB free on camera SD", bytes / (1024.0 * 1024.0))
 }

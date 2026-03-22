@@ -84,9 +84,9 @@ class MainActivity : ComponentActivity() {
                 .launchIn(lifecycleScope)
 
             pendingTransferFiles?.let { files ->
-                Log.d(TAG, "Starting pending transfer of ${files.size} files")
+                Log.d(TAG, "Starting pending transfer of ${files.size} files, deleteMode=$pendingDeleteMode")
                 pendingTransferFiles = null
-                binder.service.startTransfer(files)
+                binder.service.startTransfer(files, pendingDeleteMode)
             }
         }
 
@@ -194,7 +194,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private var pendingTransferFiles: List<com.canon.cr3transfer.domain.model.Cr3File>? = null
+    private var pendingTransferFiles: List<com.canon.cr3transfer.domain.model.CameraFile>? = null
+    private var pendingDeleteMode: Boolean = false
 
     private fun startTransfer() {
         val files = viewModel.selectedFiles()
@@ -205,12 +206,16 @@ class MainActivity : ComponentActivity() {
 
         Log.d(TAG, "startTransfer: ${files.size} files")
 
+        val deleteMode = (viewModel.state.value as? com.canon.cr3transfer.domain.model.TransferState.FilePicker)
+            ?.deleteAfterTransfer ?: false
+
         if (transferService != null) {
             Log.d(TAG, "Service already bound, starting transfer directly")
-            transferService!!.startTransfer(files)
+            transferService!!.startTransfer(files, deleteMode)
             return
         }
 
+        pendingDeleteMode = deleteMode
         pendingTransferFiles = files
         val serviceIntent = Intent(this, TransferForegroundService::class.java)
         ContextCompat.startForegroundService(this, serviceIntent)

@@ -1,8 +1,11 @@
 package com.canon.cr3transfer.domain.model
 
-data class Cr3File(
+enum class FileType { CR3, MP4 }
+
+data class CameraFile(
     val objectHandle: Int,
     val name: String,
     val sizeBytes: Long,
     val dateCreated: Long,
+    val fileType: FileType,
 )

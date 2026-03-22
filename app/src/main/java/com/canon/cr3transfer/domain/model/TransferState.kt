@@ -5,8 +5,10 @@ sealed interface TransferState {
     data object CameraConnected : TransferState
     data object Scanning : TransferState
     data class FilePicker(
-        val files: List<Cr3File>,
+        val files: List<CameraFile>,
         val selectedHandles: Set<Int>,
+        val cameraFreeBytes: Long? = null,
+        val deleteAfterTransfer: Boolean = false,
     ) : TransferState
 
     data class Transferring(

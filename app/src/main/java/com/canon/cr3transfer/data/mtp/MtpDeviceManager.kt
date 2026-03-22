@@ -41,6 +41,13 @@ class MtpDeviceManager @Inject constructor(
         return mtpDevice?.getThumbnail(objectHandle)
     }
 
+    fun getCameraFreeBytes(): Long? {
+        val ids = mtpDevice?.storageIds ?: return null
+        if (ids.isEmpty()) return null
+        val info = mtpDevice?.getStorageInfo(ids[0]) ?: return null
+        return if (info.freeSpace >= 0) info.freeSpace else null
+    }
+
     fun close() {
         mtpDevice?.close()
         mtpDevice = null

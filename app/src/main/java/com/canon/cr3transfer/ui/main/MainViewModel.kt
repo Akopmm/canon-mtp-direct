@@ -7,7 +7,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.canon.cr3transfer.data.mtp.MtpDeviceManager
 import com.canon.cr3transfer.data.mtp.MtpTransferRepository
-import com.canon.cr3transfer.domain.model.Cr3File
+import com.canon.cr3transfer.data.prefs.TransferSessionRepository
+import com.canon.cr3transfer.domain.model.CameraFile
+import com.canon.cr3transfer.domain.model.TransferSession
 import com.canon.cr3transfer.domain.model.TransferState
 import com.canon.cr3transfer.domain.usecase.ScanCameraUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,6 +26,7 @@ class MainViewModel @Inject constructor(
     private val deviceManager: MtpDeviceManager,
     private val scanCameraUseCase: ScanCameraUseCase,
     private val transferRepository: MtpTransferRepository,
+    private val sessionRepository: TransferSessionRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<TransferState>(TransferState.Idle)
@@ -32,12 +35,18 @@ class MainViewModel @Inject constructor(
     private val _thumbnails = MutableStateFlow<Map<Int, ByteArray>>(emptyMap())
     val thumbnails: StateFlow<Map<Int, ByteArray>> = _thumbnails.asStateFlow()
 
-    private var scannedFiles: List<Cr3File> = emptyList()
+    private val _showHistory = MutableStateFlow(false)
+    val showHistory: StateFlow<Boolean> = _showHistory.asStateFlow()
+
+    private val _sessionHistory = MutableStateFlow<List<TransferSession>>(emptyList())
+    val sessionHistory: StateFlow<List<TransferSession>> = _sessionHistory.asStateFlow()
+
+    private var scannedFiles: List<CameraFile> = emptyList()
     private var isConnecting = false
 
-    val files: List<Cr3File> get() = scannedFiles
+    val files: List<CameraFile> get() = scannedFiles
 
-    fun selectedFiles(): List<Cr3File> {
+    fun selectedFiles(): List<CameraFile> {
         val state = _state.value
         if (state is TransferState.FilePicker) {
             return scannedFiles.filter { it.objectHandle in state.selectedHandles }
@@ -97,10 +106,9 @@ class MainViewModel @Inject constructor(
                     _state.value = TransferState.Done(transferred = 0, skipped = 0, failed = 0)
                     return@launch
                 }
-                // Pre-select only files not yet on disk; user can still manually pick others
                 val newHandles = withContext(Dispatchers.IO) {
                     scannedFiles
-                        .filter { !transferRepository.isAlreadyImported(it.name) }
+                        .filter { !transferRepository.isAlreadyImported(it.name, it.fileType) }
                         .map { it.objectHandle }
                         .toSet()
                 }
@@ -108,17 +116,22 @@ class MainViewModel @Inject constructor(
                     files = scannedFiles,
                     selectedHandles = newHandles,
                 )
-                // Load thumbnails lazily in background
                 loadThumbnails(scannedFiles)
+                // Fetch camera free space concurrently
+                viewModelScope.launch(Dispatchers.IO) {
+                    val freeBytes = deviceManager.getCameraFreeBytes()
+                    val current = _state.value
+                    if (current is TransferState.FilePicker) {
+                        _state.value = current.copy(cameraFreeBytes = freeBytes)
+                    }
+                }
             } catch (e: Exception) {
-                _state.value = TransferState.Error(
-                    message = e.message ?: "Failed to scan camera",
-                )
+                _state.value = TransferState.Error(message = e.message ?: "Failed to scan camera")
             }
         }
     }
 
-    private fun loadThumbnails(files: List<Cr3File>) {
+    private fun loadThumbnails(files: List<CameraFile>) {
         viewModelScope.launch {
             for (file in files) {
                 val thumb = withContext(Dispatchers.IO) {
@@ -146,9 +159,7 @@ class MainViewModel @Inject constructor(
     fun selectAll() {
         val current = _state.value
         if (current is TransferState.FilePicker) {
-            _state.value = current.copy(
-                selectedHandles = current.files.map { it.objectHandle }.toSet()
-            )
+            _state.value = current.copy(selectedHandles = current.files.map { it.objectHandle }.toSet())
         }
     }
 
@@ -157,6 +168,11 @@ class MainViewModel @Inject constructor(
         if (current is TransferState.FilePicker) {
             _state.value = current.copy(selectedHandles = emptySet())
         }
+    }
+
+    fun toggleDeleteAfterTransfer() {
+        val current = _state.value as? TransferState.FilePicker ?: return
+        _state.value = current.copy(deleteAfterTransfer = !current.deleteAfterTransfer)
     }
 
     fun checkStorageAndProceed(): Boolean {
@@ -174,6 +190,17 @@ class MainViewModel @Inject constructor(
         return true
     }
 
+    fun openHistory() {
+        viewModelScope.launch {
+            _sessionHistory.value = sessionRepository.loadSessions()
+            _showHistory.value = true
+        }
+    }
+
+    fun closeHistory() {
+        _showHistory.value = false
+    }
+
     fun updateState(newState: TransferState) {
         _state.value = newState
     }
@@ -185,10 +212,7 @@ class MainViewModel @Inject constructor(
 
     private fun formatSize(bytes: Long): String {
         val gb = bytes / (1024.0 * 1024.0 * 1024.0)
-        return if (gb >= 1.0) {
-            String.format("%.1f GB", gb)
-        } else {
-            String.format("%.0f MB", bytes / (1024.0 * 1024.0))
-        }
+        return if (gb >= 1.0) String.format("%.1f GB", gb)
+        else String.format("%.0f MB", bytes / (1024.0 * 1024.0))
     }
 }
