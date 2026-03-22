@@ -12,9 +12,10 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.canon.cr3transfer.R
-import com.canon.cr3transfer.domain.model.Cr3File
+import com.canon.cr3transfer.data.prefs.TransferSessionRepository
+import com.canon.cr3transfer.domain.model.CameraFile
 import com.canon.cr3transfer.domain.model.FileStatus
-import com.canon.cr3transfer.domain.model.FileTransferStatus
+import com.canon.cr3transfer.domain.model.TransferSession
 import com.canon.cr3transfer.domain.model.TransferState
 import com.canon.cr3transfer.domain.usecase.TransferFilesUseCase
 import dagger.hilt.android.AndroidEntryPoint
@@ -33,6 +34,7 @@ import javax.inject.Inject
 class TransferForegroundService : Service() {
 
     @Inject lateinit var transferFilesUseCase: TransferFilesUseCase
+    @Inject lateinit var sessionRepository: TransferSessionRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val binder = LocalBinder()
@@ -48,11 +50,11 @@ class TransferForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createNotificationChannels()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildNotification("Preparing transfer…")
+        val notification = buildProgressNotification("Preparing transfer…")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
@@ -61,28 +63,26 @@ class TransferForegroundService : Service() {
         return START_NOT_STICKY
     }
 
-    fun startTransfer(files: List<Cr3File>) {
-        Log.d(TAG, "startTransfer called with ${files.size} files")
+    fun startTransfer(files: List<CameraFile>, deleteAfterTransfer: Boolean = false) {
+        Log.d(TAG, "startTransfer called with ${files.size} files, deleteAfterTransfer=$deleteAfterTransfer")
+        val startTimeMs = System.currentTimeMillis()
         scope.launch {
             try {
-                Log.d(TAG, "Starting transfer flow collection")
-                transferFilesUseCase(files)
+                transferFilesUseCase(files, deleteAfterTransfer)
                     .catch { e ->
                         Log.e(TAG, "Transfer flow error", e)
-                        _transferState.value = TransferState.Error(
-                            message = e.message ?: "Transfer failed",
-                        )
+                        _transferState.value = TransferState.Error(message = e.message ?: "Transfer failed")
                         stopSelf()
                     }
                     .collect { progress ->
-                        Log.d(TAG, "Transfer progress: ${progress.completedFiles}/${progress.totalFiles} - ${progress.currentFileName}")
+                        Log.d(TAG, "Progress: ${progress.completedFiles}/${progress.totalFiles} — ${progress.currentFileName}")
                         _transferState.value = TransferState.Transferring(
                             totalFiles = progress.totalFiles,
                             completedFiles = progress.completedFiles,
                             currentFileName = progress.currentFileName,
                             fileStatuses = progress.fileStatuses,
                         )
-                        updateNotification(
+                        updateProgressNotification(
                             "Transferring ${progress.completedFiles} of ${progress.totalFiles} — ${progress.currentFileName}"
                         )
                     }
@@ -90,12 +90,37 @@ class TransferForegroundService : Service() {
                 val current = _transferState.value
                 if (current is TransferState.Transferring) {
                     val statuses = current.fileStatuses
-                    _transferState.value = TransferState.Done(
+                    val done = TransferState.Done(
                         transferred = statuses.count { it.status == FileStatus.DONE },
                         skipped = statuses.count { it.status == FileStatus.SKIPPED },
                         failed = statuses.count { it.status == FileStatus.ERROR },
                     )
+                    _transferState.value = done
+
+                    // Save session history
+                    val durationMs = System.currentTimeMillis() - startTimeMs
+                    val totalBytes = files.zip(statuses)
+                        .filter { (_, s) -> s.status == FileStatus.DONE }
+                        .sumOf { (f, _) -> f.sizeBytes }
+                    scope.launch(Dispatchers.IO) {
+                        sessionRepository.saveSession(
+                            TransferSession(
+                                id = startTimeMs.toString(),
+                                dateMillis = startTimeMs,
+                                transferred = done.transferred,
+                                skipped = done.skipped,
+                                failed = done.failed,
+                                totalBytes = totalBytes,
+                                durationMs = durationMs,
+                            )
+                        )
+                    }
+
+                    // Post completion notification
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    postCompletionNotification(done.transferred, done.skipped, done.failed)
                 }
+
                 Log.d(TAG, "Transfer completed, final state: ${_transferState.value}")
                 stopSelf()
             } catch (e: Exception) {
@@ -116,33 +141,45 @@ class TransferForegroundService : Service() {
         super.onDestroy()
     }
 
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            getString(R.string.transfer_notification_channel),
-            NotificationManager.IMPORTANCE_LOW,
-        )
+    private fun createNotificationChannels() {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, getString(R.string.transfer_notification_channel), NotificationManager.IMPORTANCE_LOW)
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(COMPLETION_CHANNEL_ID, "Transfer Complete", NotificationManager.IMPORTANCE_DEFAULT)
+        )
     }
 
-    private fun buildNotification(text: String): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun buildProgressNotification(text: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.transfer_notification_title))
             .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)
             .build()
+
+    private fun updateProgressNotification(text: String) {
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, buildProgressNotification(text))
     }
 
-    private fun updateNotification(text: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(text))
+    private fun postCompletionNotification(transferred: Int, skipped: Int, failed: Int) {
+        val text = "$transferred transferred, $skipped skipped" + if (failed > 0) ", $failed failed" else ""
+        val notification = NotificationCompat.Builder(this, COMPLETION_CHANNEL_ID)
+            .setContentTitle("Canon Transfer Complete")
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(COMPLETION_NOTIFICATION_ID, notification)
     }
 
     companion object {
         private const val TAG = "TransferService"
         const val CHANNEL_ID = "transfer_channel"
+        const val COMPLETION_CHANNEL_ID = "transfer_complete_channel"
         const val NOTIFICATION_ID = 1
+        const val COMPLETION_NOTIFICATION_ID = 2
     }
 }

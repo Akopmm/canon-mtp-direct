@@ -5,9 +5,10 @@ import android.media.MediaScannerConnection
 import android.mtp.MtpDevice
 import android.os.Environment
 import android.util.Log
-import com.canon.cr3transfer.domain.model.Cr3File
+import com.canon.cr3transfer.domain.model.CameraFile
 import com.canon.cr3transfer.domain.model.FileStatus
 import com.canon.cr3transfer.domain.model.FileTransferStatus
+import com.canon.cr3transfer.domain.model.FileType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -34,16 +35,19 @@ data class TransferProgress(
 class MtpTransferRepository @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    /** Returns true if a file with this name already exists anywhere under CanonImports/. */
-    fun isAlreadyImported(fileName: String): Boolean =
-        outputDirectory.walkTopDown().any { it.isFile && it.name == fileName }
+    /** Returns true if a file with this name already exists anywhere under the appropriate CanonImports root. */
+    fun isAlreadyImported(fileName: String, fileType: FileType): Boolean {
+        val root = if (fileType == FileType.MP4) videoOutputDirectory else photoOutputDirectory
+        return root.walkTopDown().any { it.isFile && it.name == fileName }
+    }
+
     fun transferFiles(
         device: MtpDevice,
-        files: List<Cr3File>,
+        files: List<CameraFile>,
+        deleteAfterTransfer: Boolean = false,
     ): Flow<TransferProgress> = flow {
         val dateFolder = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        val destDir = getDestDir(dateFolder)
-        Log.d(TAG, "Destination directory: ${destDir.absolutePath}")
+        Log.d(TAG, "Starting transfer to date folder: $dateFolder")
 
         val statuses = files.map { file ->
             FileTransferStatus(
@@ -56,8 +60,12 @@ class MtpTransferRepository @Inject constructor(
         var completed = 0
 
         for ((index, file) in files.withIndex()) {
+            val destDir = when (file.fileType) {
+                FileType.CR3 -> getPhotoDestDir(dateFolder)
+                FileType.MP4 -> getVideoDestDir(dateFolder)
+            }
             val destFile = File(destDir, file.name)
-            val alreadyTransferred = isAlreadyImported(file.name)
+            val alreadyTransferred = isAlreadyImported(file.name, file.fileType)
             Log.d(TAG, "File ${file.name}: alreadyImported=$alreadyTransferred")
 
             if (alreadyTransferred) {
@@ -76,11 +84,14 @@ class MtpTransferRepository @Inject constructor(
                     val imported = device.importFile(file.objectHandle, destFile.absolutePath)
                     Log.d(TAG, "importFile returned: $imported, file exists: ${destFile.exists()}, size: ${destFile.length()}")
                     if (imported && destFile.exists() && destFile.length() > 0) {
-                        // Trigger media scan so it shows in gallery/file managers
+                        val mimeType = when (file.fileType) {
+                            FileType.CR3 -> "image/x-canon-cr3"
+                            FileType.MP4 -> "video/mp4"
+                        }
                         MediaScannerConnection.scanFile(
                             context,
                             arrayOf(destFile.absolutePath),
-                            arrayOf("application/octet-stream"),
+                            arrayOf(mimeType),
                             null,
                         )
                         true
@@ -99,6 +110,14 @@ class MtpTransferRepository @Inject constructor(
             if (success) {
                 statuses[index] = statuses[index].copy(status = FileStatus.DONE)
                 Log.d(TAG, "Successfully transferred ${file.name} (${destFile.length()} bytes)")
+                if (deleteAfterTransfer) {
+                    try {
+                        device.deleteObject(file.objectHandle)
+                        Log.d(TAG, "Deleted ${file.name} from camera")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "deleteObject failed for ${file.name}: ${e.message}")
+                    }
+                }
             } else {
                 statuses[index] = statuses[index].copy(status = FileStatus.ERROR)
             }
@@ -108,41 +127,62 @@ class MtpTransferRepository @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    private fun getDestDir(dateFolder: String): File {
-        // Try public DCIM first (requires MANAGE_EXTERNAL_STORAGE on Android 11+)
+    private fun getPhotoDestDir(dateFolder: String): File {
         val publicDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
             "CanonImports/$dateFolder"
         )
         if (publicDir.mkdirs() || publicDir.isDirectory) {
-            // Test if we can actually write here
             val testFile = File(publicDir, ".write_test")
             try {
                 testFile.createNewFile()
                 testFile.delete()
                 return publicDir
-            } catch (_: Exception) {
-                // Can't write, fall through
-            }
+            } catch (_: Exception) { }
         }
-
-        // Fallback to app-specific external storage (always writable, visible in file manager)
-        val appDir = File(
-            context.getExternalFilesDir(null),
-            "CanonImports/$dateFolder"
-        )
+        val appDir = File(context.getExternalFilesDir(null), "CanonImports/photos/$dateFolder")
         appDir.mkdirs()
-        Log.d(TAG, "Using app-specific storage: ${appDir.absolutePath}")
         return appDir
     }
 
-    val outputDirectory: File
+    private fun getVideoDestDir(dateFolder: String): File {
+        val publicDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+            "CanonImports/$dateFolder"
+        )
+        if (publicDir.mkdirs() || publicDir.isDirectory) {
+            val testFile = File(publicDir, ".write_test")
+            try {
+                testFile.createNewFile()
+                testFile.delete()
+                return publicDir
+            } catch (_: Exception) { }
+        }
+        val appDir = File(context.getExternalFilesDir(null), "CanonImports/videos/$dateFolder")
+        appDir.mkdirs()
+        return appDir
+    }
+
+    val photoOutputDirectory: File
         get() {
             val publicDir = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
                 "CanonImports"
             )
             return if (publicDir.isDirectory) publicDir
-            else File(context.getExternalFilesDir(null), "CanonImports")
+            else File(context.getExternalFilesDir(null), "CanonImports/photos")
         }
+
+    val videoOutputDirectory: File
+        get() {
+            val publicDir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+                "CanonImports"
+            )
+            return if (publicDir.isDirectory) publicDir
+            else File(context.getExternalFilesDir(null), "CanonImports/videos")
+        }
+
+    // Kept for backward compatibility — checks both dirs
+    val outputDirectory: File get() = photoOutputDirectory
 }
