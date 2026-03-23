@@ -51,6 +51,19 @@ cd canon-mtp-direct
 
 Requires Android SDK with compileSdk 36. MTP testing requires a physical device — no emulator support for USB Host mode.
 
+### Release signing
+
+Release builds require signing credentials in `local.properties` (not committed to git):
+
+```properties
+KEYSTORE_PATH=../release.jks
+KEYSTORE_PASSWORD=your_keystore_password
+KEY_ALIAS=cr3transfer
+KEY_PASSWORD=your_key_password
+```
+
+The `release.jks` keystore file is also excluded from version control — contact the maintainer for access.
+
 ## License
 
 MIT

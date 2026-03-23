@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -6,16 +8,21 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) load(f.inputStream())
+}
+
 android {
     namespace = "com.canon.cr3transfer"
     compileSdk = 36
 
     signingConfigs {
         create("release") {
-            storeFile = file("../release.jks")
-            storePassword = "cr3transfer2026"
-            keyAlias = "cr3transfer"
-            keyPassword = "cr3transfer2026"
+            storeFile = localProps.getProperty("KEYSTORE_PATH")?.let { file(it) }
+            storePassword = localProps.getProperty("KEYSTORE_PASSWORD")
+            keyAlias = localProps.getProperty("KEY_ALIAS")
+            keyPassword = localProps.getProperty("KEY_PASSWORD")
         }
     }
 
