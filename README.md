@@ -7,11 +7,12 @@ Built specifically for the **Canon EOS R8**, but should work with other Canon ca
 ## Features
 
 - **Direct USB transfer** — plug camera into phone with USB-C cable
-- **No file limit** — transfers all CR3 files, bypassing Android's 99-file SAF picker
-- **Smart dedup** — skips files already transferred (by filename + size)
-- **Lightroom import** — one-tap send all CR3 files to Adobe Lightroom Mobile
+- **No file limit** — transfers all CR3 and MP4 files, bypassing Android's 99-file SAF picker
+- **Smart dedup** — skips files already transferred (reinstall-safe, checked against files on disk)
+- **Folder-scoped Lightroom import** — choose which date session(s) to import; available even without camera connected
 - **Background transfer** — foreground service keeps transfer alive while you use other apps
-- **Public storage** — files saved to `DCIM/CanonImports/YYYY-MM-DD/` where any app can access them
+- **Transfer history** — log of past sessions with file counts, size and duration
+- **Public storage** — CR3 to `DCIM/CanonImports/YYYY-MM-DD/`, MP4 to `Movies/CanonImports/YYYY-MM-DD/`
 
 ## Download & Install
 
@@ -53,3 +54,7 @@ Requires Android SDK with compileSdk 36. MTP testing requires a physical device 
 ## License
 
 MIT
+
+---
+
+☕ If you find this useful, [buy me a coffee](https://buymeacoffee.com/akopmm)!
