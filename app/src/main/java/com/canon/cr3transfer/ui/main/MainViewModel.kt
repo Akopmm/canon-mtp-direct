@@ -112,8 +112,9 @@ class MainViewModel @Inject constructor(
                     return@launch
                 }
                 val newHandles = withContext(Dispatchers.IO) {
+                    val cache = transferRepository.buildImportedNamesCache()
                     scannedFiles
-                        .filter { !transferRepository.isAlreadyImported(it.name, it.fileType) }
+                        .filter { !cache.contains(it.name, it.fileType) }
                         .map { it.objectHandle }
                         .toSet()
                 }

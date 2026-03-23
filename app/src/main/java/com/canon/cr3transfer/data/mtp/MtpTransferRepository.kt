@@ -31,14 +31,40 @@ data class TransferProgress(
     val fileStatuses: List<FileTransferStatus>,
 )
 
+/**
+ * Caches the set of already-imported filenames built from two walkTopDown passes.
+ * Avoids the N×walkTopDown cost when dedup-checking many files at once.
+ */
+data class ImportedNamesCache(
+    val photoNames: Set<String>,
+    val videoNames: Set<String>,
+) {
+    fun contains(fileName: String, fileType: FileType): Boolean =
+        if (fileType == FileType.MP4) fileName in videoNames else fileName in photoNames
+}
+
 @Singleton
 class MtpTransferRepository @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    /** Returns true if a file with this name already exists anywhere under the appropriate CanonImports root. */
+    /** Single-file dedup check. Use [buildImportedNamesCache] when checking many files. */
     fun isAlreadyImported(fileName: String, fileType: FileType): Boolean {
         val root = if (fileType == FileType.MP4) videoOutputDirectory else photoOutputDirectory
         return root.walkTopDown().any { it.isFile && it.name == fileName }
+    }
+
+    /**
+     * Builds filename sets for both photo and video roots in two walkTopDown passes.
+     * Use this when dedup-checking many files at once to avoid N×walkTopDown.
+     */
+    fun buildImportedNamesCache(): ImportedNamesCache {
+        val photos = photoOutputDirectory.walkTopDown()
+            .filter { it.isFile }
+            .mapTo(HashSet()) { it.name }
+        val videos = videoOutputDirectory.walkTopDown()
+            .filter { it.isFile }
+            .mapTo(HashSet()) { it.name }
+        return ImportedNamesCache(photos, videos)
     }
 
     fun transferFiles(
@@ -48,6 +74,9 @@ class MtpTransferRepository @Inject constructor(
     ): Flow<TransferProgress> = flow {
         val dateFolder = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         Log.d(TAG, "Starting transfer to date folder: $dateFolder")
+
+        // Build the dedup cache once instead of walking the filesystem per file
+        val importedCache = buildImportedNamesCache()
 
         val statuses = files.map { file ->
             FileTransferStatus(
@@ -65,7 +94,7 @@ class MtpTransferRepository @Inject constructor(
                 FileType.MP4 -> getVideoDestDir(dateFolder)
             }
             val destFile = File(destDir, file.name)
-            val alreadyTransferred = isAlreadyImported(file.name, file.fileType)
+            val alreadyTransferred = importedCache.contains(file.name, file.fileType)
             Log.d(TAG, "File ${file.name}: alreadyImported=$alreadyTransferred")
 
             if (alreadyTransferred) {
