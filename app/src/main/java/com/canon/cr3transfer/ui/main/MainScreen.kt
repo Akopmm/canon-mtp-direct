@@ -46,12 +46,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
+import android.content.Context
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,7 +110,7 @@ fun MainScreen(
             when (val currentState = state) {
                 is TransferState.Idle -> IdleContent()
                 is TransferState.CameraConnected -> CameraConnectedContent()
-                is TransferState.Scanning -> ScanningContent()
+                is TransferState.Scanning -> ScanningContent(currentState)
                 is TransferState.FilePicker -> FilePickerContent(
                     state = currentState,
                     thumbnails = thumbnails,
@@ -135,8 +141,19 @@ fun MainScreen(
 
 @Composable
 private fun IdleContent() {
+    val context = LocalContext.current
+    var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
+    var showFolderPicker by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        importFolders = withContext(Dispatchers.IO) { findImportFolders() }
+    }
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
             Text("Canon CR3 Transfer", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
@@ -144,7 +161,32 @@ private fun IdleContent() {
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (importFolders.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(24.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Previously transferred files available",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { showFolderPicker = true }) {
+                    Text("Import to Lightroom")
+                }
+            }
         }
+    }
+
+    if (showFolderPicker) {
+        FolderPickerDialog(
+            folders = importFolders,
+            onDismiss = { showFolderPicker = false },
+            onConfirm = { selected ->
+                showFolderPicker = false
+                launchLightroomImport(context, selected)
+            },
+        )
     }
 }
 
@@ -160,12 +202,20 @@ private fun CameraConnectedContent() {
 }
 
 @Composable
-private fun ScanningContent() {
+private fun ScanningContent(state: TransferState.Scanning) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(16.dp))
             Text(stringResource(R.string.scanning), style = MaterialTheme.typography.bodyLarge)
+            if (state.discoveredCount > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "${state.discoveredCount} files found\u2026",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -382,6 +432,13 @@ private fun TransferringContent(state: TransferState.Transferring) {
 @Composable
 private fun DoneContent(state: TransferState.Done) {
     val context = LocalContext.current
+    var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
+    var showFolderPicker by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        importFolders = withContext(Dispatchers.IO) { findImportFolders() }
+    }
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -396,46 +453,10 @@ private fun DoneContent(state: TransferState.Done) {
                 Text("${state.failed} files failed", color = MaterialTheme.colorScheme.error)
             }
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = {
-                val importDir = java.io.File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
-                    "CanonImports"
-                )
-                val cr3Files = importDir.walkTopDown()
-                    .filter { it.isFile && it.name.endsWith(".CR3", ignoreCase = true) }
-                    .toList()
-
-                if (cr3Files.isEmpty()) {
-                    Toast.makeText(context, "No CR3 files found", Toast.LENGTH_SHORT).show()
-                    return@Button
-                }
-
-                val authority = "${context.packageName}.fileprovider"
-                val uris = ArrayList(cr3Files.map { file ->
-                    FileProvider.getUriForFile(context, authority, file)
-                })
-
-                val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                    type = "image/*"
-                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-                    setPackage("com.adobe.lrmobile")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                try {
-                    context.startActivity(intent)
-                } catch (_: Exception) {
-                    try {
-                        val chooser = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                            type = "image/*"
-                            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(chooser, "Import ${cr3Files.size} CR3 files"))
-                    } catch (_: Exception) {
-                        Toast.makeText(context, "No app available to import files", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }) {
+            Button(
+                onClick = { showFolderPicker = true },
+                enabled = importFolders.isNotEmpty(),
+            ) {
                 Text("Import to Lightroom")
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -460,6 +481,17 @@ private fun DoneContent(state: TransferState.Done) {
                 Text(stringResource(R.string.open_folder))
             }
         }
+    }
+
+    if (showFolderPicker) {
+        FolderPickerDialog(
+            folders = importFolders,
+            onDismiss = { showFolderPicker = false },
+            onConfirm = { selected ->
+                showFolderPicker = false
+                launchLightroomImport(context, selected)
+            },
+        )
     }
 }
 
@@ -486,4 +518,110 @@ private fun formatBytes(bytes: Long): String {
     val gb = bytes / (1024.0 * 1024.0 * 1024.0)
     return if (gb >= 1.0) String.format("%.1f GB free on camera SD", gb)
     else String.format("%.0f MB free on camera SD", bytes / (1024.0 * 1024.0))
+}
+
+/** Returns date-named subdirectories of CanonImports that contain at least one CR3 file, newest first. */
+private fun findImportFolders(): List<java.io.File> {
+    val importDir = java.io.File(
+        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+        "CanonImports",
+    )
+    if (!importDir.exists()) return emptyList()
+    return (importDir.listFiles() ?: return emptyList())
+        .filter { dir ->
+            dir.isDirectory && dir.walkTopDown().any { f ->
+                f.isFile && f.name.endsWith(".CR3", ignoreCase = true)
+            }
+        }
+        .sortedDescending()
+}
+
+private fun launchLightroomImport(context: Context, folders: List<java.io.File>) {
+    val cr3Files = folders.flatMap { folder ->
+        folder.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".CR3", ignoreCase = true) }
+            .toList()
+    }
+    if (cr3Files.isEmpty()) {
+        Toast.makeText(context, "No CR3 files found in selected folders", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val authority = "${context.packageName}.fileprovider"
+    val uris = ArrayList(cr3Files.map { FileProvider.getUriForFile(context, authority, it) })
+    val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+        type = "image/*"
+        putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+        setPackage("com.adobe.lrmobile")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: Exception) {
+        try {
+            val chooser = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "image/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(chooser, "Import ${cr3Files.size} CR3 files"))
+        } catch (_: Exception) {
+            Toast.makeText(context, "No app available to import files", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+@Composable
+private fun FolderPickerDialog(
+    folders: List<java.io.File>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<java.io.File>) -> Unit,
+) {
+    // Default: pre-select the most recent folder (first after sortedDescending)
+    var selected by remember {
+        mutableStateOf(if (folders.isNotEmpty()) setOf(folders.first().name) else emptySet())
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select folders to import") },
+        text = {
+            LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                items(folders) { folder ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                selected = if (folder.name in selected) {
+                                    selected - folder.name
+                                } else {
+                                    selected + folder.name
+                                }
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = folder.name in selected,
+                            onCheckedChange = { checked ->
+                                selected = if (checked) selected + folder.name else selected - folder.name
+                            },
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(folder.name, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onConfirm(folders.filter { it.name in selected })
+                },
+                enabled = selected.isNotEmpty(),
+            ) { Text("Import") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }

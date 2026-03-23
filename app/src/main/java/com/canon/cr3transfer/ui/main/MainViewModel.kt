@@ -99,9 +99,14 @@ class MainViewModel @Inject constructor(
 
     fun scanCamera() {
         viewModelScope.launch {
-            _state.value = TransferState.Scanning
+            _state.value = TransferState.Scanning()
+            val discovered = mutableListOf<CameraFile>()
             try {
-                scannedFiles = scanCameraUseCase()
+                scanCameraUseCase().collect { file ->
+                    discovered.add(file)
+                    _state.value = TransferState.Scanning(discoveredCount = discovered.size)
+                }
+                scannedFiles = discovered
                 if (scannedFiles.isEmpty()) {
                     _state.value = TransferState.Done(transferred = 0, skipped = 0, failed = 0)
                     return@launch
