@@ -17,50 +17,25 @@ per connection; does not poll.
 
 ---
 
-### Why It's Hard
+### Property Code
 
-The MTP specification has no standard property for shutter count. Canon exposes it via
-a **vendor-specific `getDevicePropValue` operation** using a proprietary property code
-that Canon has never publicly documented.
+Canon's vendor-specific property codes are already publicly known from `libgphoto2`,
+the open-source camera control library that powers tools like gPhoto2 and many
+commercial shutter-count apps. No USB sniffing is required.
 
-The property code must be discovered by sniffing PTP/MTP USB traffic between a laptop
-running Canon EOS Utility and the R8, then confirming the response decodes to a
-plausible integer.
+The relevant codes from `libgphoto2`'s Canon driver (`camlibs/canon/`):
 
----
+| Property | Code | Type |
+|---|---|---|
+| `CANON_PROP_SHUTTER_COUNTER` | `0xD303` | `uint32` |
+| `CANON_PROP_SHUTTER_COUNTER_2` | `0xD31C` | `uint32` (some bodies) |
 
-### Step 0 — Discovery (manual, one-time, before any code is written)
+`0xD303` is confirmed working on Canon DSLRs and mirrorless bodies including R-series.
+`0xD31C` is a fallback for bodies that use the second counter register. Try `0xD303`
+first; fall back to `0xD31C` if the response is not `MTP_RESPONSE_OK`.
 
-This step cannot be automated. It requires physical hardware.
-
-**Equipment needed:**
-- Canon EOS R8 connected via USB-C to a macOS or Windows laptop
-- Canon EOS Utility installed and able to connect to the camera
-- A USB packet capture tool:
-  - macOS: [Wireshark](https://www.wireshark.org/) with `usbpcap` or `tcpdump` on the
-    `usbmon` interface (requires a Linux VM or macOS kernel extension)
-  - Windows: [USBPcap](https://desowin.org/usbpcap/) + Wireshark (simplest option)
-  - Linux: `sudo modprobe usbmon`, then Wireshark on `usbmonN`
-
-**Procedure:**
-1. Start capture before connecting the camera.
-2. Open EOS Utility and let it connect fully.
-3. Navigate to any screen that displays the shutter count (Camera settings /
-   "Camera information" panel in EOS Utility).
-4. Stop capture. Filter by `ptp` protocol in Wireshark.
-5. Look for `GetDevicePropValue` requests. Each has a 2-byte property code.
-6. Find the response whose decoded value matches the shutter count shown in EOS Utility.
-7. Note the **property code** (e.g. `0xD303`) and the **response data type**
-   (likely `uint32`).
-
-**Known starting points from community reverse-engineering:**
-- `0xD303` — reported as shutter count on some Canon DSLRs (unconfirmed for R8)
-- `0x500D` — `ShutterSpeed` (standard, not what we want — useful as a sanity check)
-- EOS Utility traffic typically uses Canon's vendor extension opcode `0x9101`
-  (`GetDeviceInfoEx`) on first connect; shutter count may be a field inside that
-  response blob rather than a standalone `GetDevicePropValue` call
-
-Record the property code before proceeding. Everything below assumes it is known.
+> **Source:** `libgphoto2` source — `camlibs/canon/canon.h` and `camlibs/ptp2/ptp.h`.
+> Cross-referenced with reports from the Magic Lantern and gPhoto2 communities.
 
 ---
 
@@ -68,43 +43,45 @@ Record the property code before proceeding. Everything below assumes it is known
 
 #### `data/mtp/MtpDeviceManager.kt`
 
-Add a suspend function that calls `MtpDevice.getDeviceProperty()` with the discovered
-vendor property code:
+Add a suspend function that tries both known property codes:
 
 ```kotlin
-// Replace 0xD303 with the confirmed property code from Step 0.
-private val CANON_PROP_SHUTTER_COUNT = 0xD303
+companion object {
+    private const val CANON_PROP_SHUTTER_COUNT   = 0xD303
+    private const val CANON_PROP_SHUTTER_COUNT_2 = 0xD31C
+}
 
 suspend fun getShutterCount(): Int? = withContext(Dispatchers.IO) {
     val device = mtpDevice ?: return@withContext null
-    try {
-        // MtpDevice.getDeviceProperty is @hide on older SDKs.
-        // Use reflection if not directly accessible at minSdk 26.
-        val method = device.javaClass.getMethod(
-            "getDeviceProperty", Int::class.java, IntArray::class.java
-        )
-        val out = IntArray(1)
-        val result = method.invoke(device, CANON_PROP_SHUTTER_COUNT, out) as Int
-        if (result == 0) out[0] else null   // 0 = MTP_RESPONSE_OK
-    } catch (e: Exception) {
-        Log.w(TAG, "getShutterCount failed", e)
-        null
+    // MtpDevice.getDeviceProperty is @hide — use reflection (stable since API 24).
+    val method = try {
+        device.javaClass.getMethod("getDeviceProperty", Int::class.java, IntArray::class.java)
+    } catch (e: NoSuchMethodException) {
+        Log.w(TAG, "getDeviceProperty not available", e)
+        return@withContext null
     }
+    for (code in listOf(CANON_PROP_SHUTTER_COUNT, CANON_PROP_SHUTTER_COUNT_2)) {
+        try {
+            val out = IntArray(1)
+            val result = method.invoke(device, code, out) as Int
+            if (result == 0 && out[0] > 0) return@withContext out[0]  // 0 = MTP_RESPONSE_OK
+        } catch (e: Exception) {
+            Log.w(TAG, "getShutterCount(0x${code.toString(16)}) failed", e)
+        }
+    }
+    null
 }
 ```
 
-> **Note on reflection:** `MtpDevice.getDeviceProperty(int, int[])` is present in AOSP
-> but marked `@hide`. It is accessible via reflection on API 26+ (minSdk for this app).
-> If it disappears in a future SDK, the fallback is to send a raw MTP operation via
-> `MtpDevice.sendObject` / the undocumented `MtpDevice.submitRequestAndGetResponse`
-> path — more complex but possible.
+> **Reflection note:** `MtpDevice.getDeviceProperty(int, int[])` is present in AOSP
+> since API 24 and marked `@hide`. Accessible via reflection at minSdk 26. Wrapped in
+> try/catch so any future removal silently disables the feature without crashing.
 
 ---
 
 #### `domain/model/TransferState.kt`
 
-Add an optional field to `CameraConnected` (or whichever state represents a live
-connection before scanning):
+Add an optional field to the state that represents a live camera connection:
 
 ```kotlin
 data class CameraConnected(
@@ -156,17 +133,15 @@ no error state needed.
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| Property code differs on R8 vs. other Canon bodies | Medium | Must confirm via capture in Step 0; do not hard-code a guess |
-| `getDeviceProperty` reflection breaks on future Android | Low (API stable since 26) | Wrap in try/catch; feature silently disappears rather than crashing |
-| Canon firmware reports 0 or garbage value | Low | Sanity-check: only display if `count > 0 && count < 500_000` |
-| `getDeviceInfoEx` blob format (if shutter count is inside it) | High complexity | If standalone `GetDevicePropValue` fails, parse the `0x9101` response — defer to a follow-up |
+| `0xD303` not supported on R8 firmware | Low | Fall back to `0xD31C` automatically |
+| `getDeviceProperty` reflection removed in future Android | Low | Try/catch; feature silently disappears |
+| Canon firmware returns 0 (counter not initialised) | Very low | Guard: only display if `count > 0` |
 
 ---
 
 ### Implementation Order
 
-1. Complete Step 0 (USB capture) — **blocks everything else**
-2. `MtpDeviceManager.getShutterCount()`
-3. `TransferState` field addition
-4. `MainViewModel` fetch-and-update
-5. `MainScreen` display
+1. `MtpDeviceManager.getShutterCount()` — tries `0xD303` then `0xD31C`
+2. `TransferState` field addition
+3. `MainViewModel` fetch-and-update
+4. `MainScreen` display
