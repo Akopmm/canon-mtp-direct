@@ -1,4 +1,4 @@
-# Canon CR3 Transfer — v2 Features Plan
+# Canon CR3 Transfer — v1.1 Features Plan
 
 ## Features
 
