@@ -5,8 +5,10 @@ import android.os.Environment
 import android.os.StatFs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.canon.cr3transfer.data.exif.ExifReader
 import com.canon.cr3transfer.data.mtp.MtpDeviceManager
 import com.canon.cr3transfer.data.mtp.MtpTransferRepository
+import com.canon.cr3transfer.data.prefs.AppSettings
 import com.canon.cr3transfer.data.prefs.TransferSessionRepository
 import com.canon.cr3transfer.domain.model.CameraFile
 import com.canon.cr3transfer.domain.model.TransferSession
@@ -15,8 +17,11 @@ import com.canon.cr3transfer.domain.usecase.ScanCameraUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -27,6 +32,8 @@ class MainViewModel @Inject constructor(
     private val scanCameraUseCase: ScanCameraUseCase,
     private val transferRepository: MtpTransferRepository,
     private val sessionRepository: TransferSessionRepository,
+    private val appSettings: AppSettings,
+    private val exifReader: ExifReader,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<TransferState>(TransferState.Idle)
@@ -40,6 +47,17 @@ class MainViewModel @Inject constructor(
 
     private val _sessionHistory = MutableStateFlow<List<TransferSession>>(emptyList())
     val sessionHistory: StateFlow<List<TransferSession>> = _sessionHistory.asStateFlow()
+
+    private val _showSettings = MutableStateFlow(false)
+    val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
+
+    private val _fileDetail = MutableStateFlow<Pair<CameraFile, ExifReader.ExifData?>?>(null)
+    val fileDetail: StateFlow<Pair<CameraFile, ExifReader.ExifData?>?> = _fileDetail.asStateFlow()
+
+    val keepScreenOn: StateFlow<Boolean> = appSettings.keepScreenOn
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val appSettingsState: AppSettings get() = appSettings
 
     private var scannedFiles: List<CameraFile> = emptyList()
     private var isConnecting = false
@@ -111,16 +129,24 @@ class MainViewModel @Inject constructor(
                     _state.value = TransferState.Done(transferred = 0, skipped = 0, failed = 0)
                     return@launch
                 }
-                val newHandles = withContext(Dispatchers.IO) {
+                val (newHandles, gridCols) = withContext(Dispatchers.IO) {
                     val cache = transferRepository.buildImportedNamesCache()
-                    scannedFiles
-                        .filter { !cache.contains(it.name, it.fileType) }
-                        .map { it.objectHandle }
-                        .toSet()
+                    val defaultSel = appSettings.defaultSelection.first()
+                    val cols = appSettings.gridColumns.first()
+                    val handles = when (defaultSel) {
+                        "ALL" -> scannedFiles.map { it.objectHandle }.toSet()
+                        "NONE" -> emptySet()
+                        else -> scannedFiles
+                            .filter { !cache.contains(it.name, it.fileType) }
+                            .map { it.objectHandle }
+                            .toSet()
+                    }
+                    handles to cols
                 }
                 _state.value = TransferState.FilePicker(
                     files = scannedFiles,
                     selectedHandles = newHandles,
+                    gridColumns = gridCols,
                 )
                 loadThumbnails(scannedFiles)
                 // Fetch camera free space concurrently
@@ -226,7 +252,28 @@ class MainViewModel @Inject constructor(
         val current = _state.value as? TransferState.FilePicker ?: return
         val next = when (current.gridColumns) { 3 -> 4; 4 -> 2; else -> 3 }
         _state.value = current.copy(gridColumns = next)
+        viewModelScope.launch { appSettings.setGridColumns(next) }
     }
+
+    fun openSettings() { _showSettings.value = true }
+    fun closeSettings() { _showSettings.value = false }
+
+    fun showFileDetail(file: CameraFile) {
+        _fileDetail.value = file to null
+        viewModelScope.launch {
+            val exifData = withContext(Dispatchers.IO) {
+                val dir = if (file.fileType == com.canon.cr3transfer.domain.model.FileType.MP4)
+                    transferRepository.videoOutputDirectory
+                else
+                    transferRepository.photoOutputDirectory
+                val localFile = dir.walkTopDown().firstOrNull { it.name == file.name }
+                localFile?.let { exifReader.read(it) }
+            }
+            _fileDetail.value = file to exifData
+        }
+    }
+
+    fun hideFileDetail() { _fileDetail.value = null }
 
     fun toggleDeleteAfterTransfer() {
         val current = _state.value as? TransferState.FilePicker ?: return
