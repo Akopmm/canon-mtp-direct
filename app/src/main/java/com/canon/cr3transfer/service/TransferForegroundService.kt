@@ -81,6 +81,7 @@ class TransferForegroundService : Service() {
                             completedFiles = progress.completedFiles,
                             currentFileName = progress.currentFileName,
                             fileStatuses = progress.fileStatuses,
+                            transferSpeedMbps = progress.speedMbps,
                         )
                         updateProgressNotification(
                             "Transferring ${progress.completedFiles} of ${progress.totalFiles} — ${progress.currentFileName}"

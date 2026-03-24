@@ -29,6 +29,7 @@ data class TransferProgress(
     val completedFiles: Int,
     val currentFileName: String,
     val fileStatuses: List<FileTransferStatus>,
+    val speedMbps: Double? = null,
 )
 
 /**
@@ -87,6 +88,7 @@ class MtpTransferRepository @Inject constructor(
         }.toMutableList()
 
         var completed = 0
+        val recentSpeeds = ArrayDeque<Double>()
 
         for ((index, file) in files.withIndex()) {
             val destDir = when (file.fileType) {
@@ -107,6 +109,7 @@ class MtpTransferRepository @Inject constructor(
             statuses[index] = statuses[index].copy(status = FileStatus.TRANSFERRING)
             emit(TransferProgress(files.size, completed, file.name, statuses.toList()))
 
+            val fileStartMs = System.currentTimeMillis()
             val success = withContext(Dispatchers.IO) {
                 try {
                     Log.d(TAG, "Importing ${file.name} (handle=0x${file.objectHandle.toString(16)}) to ${destFile.absolutePath}")
@@ -138,6 +141,12 @@ class MtpTransferRepository @Inject constructor(
 
             if (success) {
                 statuses[index] = statuses[index].copy(status = FileStatus.DONE)
+                val elapsedMs = System.currentTimeMillis() - fileStartMs
+                if (elapsedMs > 0) {
+                    val speed = file.sizeBytes / 1_048_576.0 / (elapsedMs / 1000.0)
+                    recentSpeeds.addLast(speed)
+                    if (recentSpeeds.size > 3) recentSpeeds.removeFirst()
+                }
                 Log.d(TAG, "Successfully transferred ${file.name} (${destFile.length()} bytes)")
                 if (deleteAfterTransfer) {
                     try {
@@ -152,7 +161,8 @@ class MtpTransferRepository @Inject constructor(
             }
 
             completed++
-            emit(TransferProgress(files.size, completed, file.name, statuses.toList()))
+            val smoothedSpeed = if (recentSpeeds.isNotEmpty()) recentSpeeds.average() else null
+            emit(TransferProgress(files.size, completed, file.name, statuses.toList(), smoothedSpeed))
         }
     }.flowOn(Dispatchers.IO)
 

@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -263,23 +264,32 @@ private fun FilePickerContent(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Selection controls row
+        // Row 1: count + grid toggle
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("$selectedCount / $totalCount selected", style = MaterialTheme.typography.titleSmall)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onSelectAll) { Text("All") }
-                TextButton(onClick = onSelectNone) { Text("None") }
-                TextButton(onClick = onSelectToday) { Text("Today") }
-                TextButton(onClick = onSelectThisWeek) { Text("Week") }
-                TextButton(onClick = onSelectNew) { Text("New") }
-                TextButton(onClick = onCycleGrid) {
-                    Text("${state.gridColumns}×", style = MaterialTheme.typography.labelMedium)
-                }
+            TextButton(
+                onClick = onCycleGrid,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+            ) {
+                Text("${state.gridColumns} col", style = MaterialTheme.typography.labelMedium)
             }
+        }
+        // Row 2: selection shortcuts
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val btnPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+            TextButton(onClick = onSelectAll, contentPadding = btnPadding) { Text("All") }
+            TextButton(onClick = onSelectNone, contentPadding = btnPadding) { Text("None") }
+            TextButton(onClick = onSelectToday, contentPadding = btnPadding) { Text("Today") }
+            TextButton(onClick = onSelectThisWeek, contentPadding = btnPadding) { Text("Week") }
+            TextButton(onClick = onSelectNew, contentPadding = btnPadding) { Text("New") }
         }
 
         // SD card free space
@@ -440,6 +450,14 @@ private fun TransferringContent(state: TransferState.Transferring) {
             total = state.totalFiles,
             currentFileName = state.currentFileName,
         )
+        state.transferSpeedMbps?.let { speed ->
+            Text(
+                text = String.format("%.1f MB/s", speed),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+        }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(state.fileStatuses) { fileStatus ->
                 FileProgressItem(fileStatus = fileStatus)

@@ -17,6 +17,7 @@ sealed interface TransferState {
         val completedFiles: Int,
         val currentFileName: String,
         val fileStatuses: List<FileTransferStatus>,
+        val transferSpeedMbps: Double? = null,
     ) : TransferState
 
     data class Done(
