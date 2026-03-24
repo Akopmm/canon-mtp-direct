@@ -17,6 +17,27 @@ per connection; does not poll.
 
 ---
 
+### Android 16 Blocker (confirmed via live device testing, 2026-03-24)
+
+`android.mtp.MtpDevice` on Android 16 (API 36) exposes only these methods:
+
+```
+close, deleteObject, getDeviceId, getDeviceInfo, getDeviceName, getObject,
+getObjectHandles, getObjectInfo, getParent, getPartialObject, getPartialObject64,
+getStorageId, getStorageIds, getStorageInfo, getThumbnail, importFile, open,
+readEvent, sendObject, sendObjectInfo
+```
+
+`getDeviceProperty` **does not exist**. Reflection returns `NoSuchMethodException`.
+`getShutterCount()` in `MtpDeviceManager` currently stubs to `null`.
+
+The only path forward is **raw USB PTP** — sending `GetDevicePropValue` request
+packets manually via `UsbDeviceConnection.bulkTransfer`. This requires managing
+the USB endpoints directly alongside (or instead of) `MtpDevice`. See
+Implementation section below for updated approach.
+
+---
+
 ### Property Code
 
 Canon's vendor-specific property codes are already publicly known from `libgphoto2`,
