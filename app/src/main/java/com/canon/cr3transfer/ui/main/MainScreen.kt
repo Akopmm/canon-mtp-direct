@@ -268,18 +268,10 @@ private fun FilePickerContent(
             }
         }
 
-        // SD card free space + shutter count
+        // SD card free space
         state.cameraFreeBytes?.let { freeBytes ->
             Text(
                 text = formatBytes(freeBytes),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 2.dp),
-            )
-        }
-        state.shutterCount?.let { count ->
-            Text(
-                text = "Shutter count: ${"%,d".format(count)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp),

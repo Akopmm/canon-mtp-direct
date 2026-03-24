@@ -41,10 +41,6 @@ class MtpDeviceManager @Inject constructor(
         return mtpDevice?.getThumbnail(objectHandle)
     }
 
-    // Android 16's MtpDevice does not expose getDeviceProperty — always returns null.
-    // Raw USB PTP approach needed; tracked in FEATURES_V1.3.md.
-    fun getShutterCount(): Int? = null
-
     fun getCameraFreeBytes(): Long? {
         val ids = mtpDevice?.storageIds ?: return null
         if (ids.isEmpty()) return null
