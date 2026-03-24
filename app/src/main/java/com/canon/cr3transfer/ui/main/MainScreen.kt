@@ -4,14 +4,11 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Environment
 import android.widget.Toast
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,7 +31,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -79,11 +75,9 @@ import com.canon.cr3transfer.domain.model.CameraFile
 import com.canon.cr3transfer.domain.model.FileType
 import com.canon.cr3transfer.domain.model.TransferState
 import com.canon.cr3transfer.ui.components.CameraSetupGuide
-import com.canon.cr3transfer.ui.components.FileDetailSheet
 import com.canon.cr3transfer.ui.components.FileProgressItem
 import com.canon.cr3transfer.ui.components.OverallProgressBar
 import com.canon.cr3transfer.ui.components.TransferHistorySheet
-import com.canon.cr3transfer.ui.settings.SettingsSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,8 +89,6 @@ fun MainScreen(
     val thumbnails by viewModel.thumbnails.collectAsState()
     val showHistory by viewModel.showHistory.collectAsState()
     val sessionHistory by viewModel.sessionHistory.collectAsState()
-    val showSettings by viewModel.showSettings.collectAsState()
-    val fileDetail by viewModel.fileDetail.collectAsState()
 
     Scaffold(
         topBar = {
@@ -105,9 +97,6 @@ fun MainScreen(
                 actions = {
                     IconButton(onClick = { viewModel.openHistory() }) {
                         Icon(Icons.Filled.List, contentDescription = "Transfer History")
-                    }
-                    IconButton(onClick = { viewModel.openSettings() }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                 },
             )
@@ -128,11 +117,7 @@ fun MainScreen(
                     onToggleFile = { viewModel.toggleFileSelection(it) },
                     onSelectAll = { viewModel.selectAll() },
                     onSelectNone = { viewModel.selectNone() },
-                    onSelectToday = { viewModel.selectToday() },
-                    onSelectThisWeek = { viewModel.selectThisWeek() },
-                    onSelectNew = { viewModel.selectNew() },
                     onToggleDeleteMode = { viewModel.toggleDeleteAfterTransfer() },
-                    onFileDetail = { viewModel.showFileDetail(it) },
                     onStartTransfer = {
                         if (viewModel.checkStorageAndProceed()) onStartTransfer()
                     },
@@ -150,21 +135,6 @@ fun MainScreen(
             ) {
                 TransferHistorySheet(sessions = sessionHistory)
             }
-        }
-
-        if (showSettings) {
-            SettingsSheet(
-                appSettings = viewModel.appSettingsState,
-                onDismiss = { viewModel.closeSettings() },
-            )
-        }
-
-        fileDetail?.let { (file, exif) ->
-            FileDetailSheet(
-                file = file,
-                exifData = exif,
-                onDismiss = { viewModel.hideFileDetail() },
-            )
         }
     }
 }
@@ -258,11 +228,7 @@ private fun FilePickerContent(
     onToggleFile: (Int) -> Unit,
     onSelectAll: () -> Unit,
     onSelectNone: () -> Unit,
-    onSelectToday: () -> Unit,
-    onSelectThisWeek: () -> Unit,
-    onSelectNew: () -> Unit,
     onToggleDeleteMode: () -> Unit,
-    onFileDetail: (CameraFile) -> Unit,
     onStartTransfer: () -> Unit,
 ) {
     val selectedCount = state.selectedHandles.size
@@ -289,30 +255,23 @@ private fun FilePickerContent(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Row 1: selection count
-        Text(
-            "$selectedCount / $totalCount selected",
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-        )
-        // Row 2: selection shortcuts
+        // Selection controls row
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val btnPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
-            TextButton(onClick = onSelectAll, contentPadding = btnPadding) { Text("All") }
-            TextButton(onClick = onSelectNone, contentPadding = btnPadding) { Text("None") }
-            TextButton(onClick = onSelectToday, contentPadding = btnPadding) { Text("Today") }
-            TextButton(onClick = onSelectThisWeek, contentPadding = btnPadding) { Text("Week") }
-            TextButton(onClick = onSelectNew, contentPadding = btnPadding) { Text("New") }
+            Text("$selectedCount / $totalCount selected", style = MaterialTheme.typography.titleSmall)
+            Row {
+                TextButton(onClick = onSelectAll) { Text("All") }
+                TextButton(onClick = onSelectNone) { Text("None") }
+            }
         }
 
         // SD card free space
         state.cameraFreeBytes?.let { freeBytes ->
             Text(
-                text = formatCameraFreeBytes(freeBytes),
+                text = formatBytes(freeBytes),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp),
@@ -335,7 +294,7 @@ private fun FilePickerContent(
 
         // Thumbnail grid
         LazyVerticalGrid(
-            columns = GridCells.Fixed(state.gridColumns),
+            columns = GridCells.Fixed(3),
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -346,15 +305,11 @@ private fun FilePickerContent(
                     thumbnailData = thumbnails[file.objectHandle],
                     isSelected = file.objectHandle in state.selectedHandles,
                     onClick = { onToggleFile(file.objectHandle) },
-                    onLongClick = { onFileDetail(file) },
                 )
             }
         }
 
         // Transfer button
-        val selectedBytes = state.files
-            .filter { it.objectHandle in state.selectedHandles }
-            .sumOf { it.sizeBytes }
         Button(
             onClick = {
                 if (state.deleteAfterTransfer) showDeleteConfirm = true
@@ -363,21 +318,17 @@ private fun FilePickerContent(
             enabled = selectedCount > 0,
             modifier = Modifier.fillMaxWidth().padding(16.dp),
         ) {
-            val label = "Transfer $selectedCount ${if (selectedCount == 1) "file" else "files"}"
-            val size = if (selectedCount > 0) " · ${formatBytes(selectedBytes)}" else ""
-            Text(label + size)
+            Text("Transfer $selectedCount ${if (selectedCount == 1) "file" else "files"}")
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileThumbnail(
     file: CameraFile,
     thumbnailData: ByteArray?,
     isSelected: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit = {},
 ) {
     val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
     val borderWidth = if (isSelected) 3.dp else 0.dp
@@ -387,7 +338,7 @@ private fun FileThumbnail(
             .aspectRatio(1f)
             .clip(RoundedCornerShape(8.dp))
             .border(borderWidth, borderColor, RoundedCornerShape(8.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .clickable(onClick = onClick),
     ) {
         if (thumbnailData != null) {
             val bitmap = remember(thumbnailData) {
@@ -470,14 +421,6 @@ private fun TransferringContent(state: TransferState.Transferring) {
             total = state.totalFiles,
             currentFileName = state.currentFileName,
         )
-        state.transferSpeedMbps?.let { speed ->
-            Text(
-                text = String.format("%.1f MB/s", speed),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-            )
-        }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(state.fileStatuses) { fileStatus ->
                 FileProgressItem(fileStatus = fileStatus)
@@ -573,11 +516,9 @@ private fun ErrorContent(state: TransferState.Error) {
 
 private fun formatBytes(bytes: Long): String {
     val gb = bytes / (1024.0 * 1024.0 * 1024.0)
-    return if (gb >= 1.0) String.format("%.1f GB", gb)
-    else String.format("%.0f MB", bytes / (1024.0 * 1024.0))
+    return if (gb >= 1.0) String.format("%.1f GB free on camera SD", gb)
+    else String.format("%.0f MB free on camera SD", bytes / (1024.0 * 1024.0))
 }
-
-private fun formatCameraFreeBytes(bytes: Long) = "${formatBytes(bytes)} free on camera SD"
 
 /** Returns date-named subdirectories of CanonImports that contain at least one CR3 file, newest first. */
 private fun findImportFolders(): List<java.io.File> {

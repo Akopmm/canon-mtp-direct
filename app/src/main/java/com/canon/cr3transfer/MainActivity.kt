@@ -28,7 +28,6 @@ import com.canon.cr3transfer.ui.main.MainScreen
 import com.canon.cr3transfer.ui.main.MainViewModel
 import com.canon.cr3transfer.ui.theme.Cr3TransferTheme
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
@@ -105,7 +104,6 @@ class MainActivity : ComponentActivity() {
         registerUsbReceivers()
         handleUsbIntent(intent)
         scanForConnectedCameras()
-        observeKeepScreenOn()
 
         setContent {
             Cr3TransferTheme {
@@ -115,20 +113,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-    }
-
-    private fun observeKeepScreenOn() {
-        combine(viewModel.state, viewModel.keepScreenOn) { state, keepOn ->
-            keepOn && state is com.canon.cr3transfer.domain.model.TransferState.Transferring
-        }
-            .onEach { shouldKeepOn ->
-                if (shouldKeepOn) {
-                    window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                } else {
-                    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                }
-            }
-            .launchIn(lifecycleScope)
     }
 
     private fun requestStoragePermissionIfNeeded() {
