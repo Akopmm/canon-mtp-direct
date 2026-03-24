@@ -176,6 +176,58 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun selectNew() {
+        val current = _state.value as? TransferState.FilePicker ?: return
+        viewModelScope.launch {
+            val cache = withContext(Dispatchers.IO) { transferRepository.buildImportedNamesCache() }
+            _state.value = current.copy(
+                selectedHandles = current.files
+                    .filter { !cache.contains(it.name, it.fileType) }
+                    .map { it.objectHandle }
+                    .toSet()
+            )
+        }
+    }
+
+    fun selectToday() {
+        val current = _state.value as? TransferState.FilePicker ?: return
+        val startOfDay = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        _state.value = current.copy(
+            selectedHandles = current.files
+                .filter { it.dateCreated >= startOfDay }
+                .map { it.objectHandle }
+                .toSet()
+        )
+    }
+
+    fun selectThisWeek() {
+        val current = _state.value as? TransferState.FilePicker ?: return
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.DAY_OF_WEEK, cal.firstDayOfWeek)
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfWeek = cal.timeInMillis
+        _state.value = current.copy(
+            selectedHandles = current.files
+                .filter { it.dateCreated >= startOfWeek }
+                .map { it.objectHandle }
+                .toSet()
+        )
+    }
+
+    fun cycleGridColumns() {
+        val current = _state.value as? TransferState.FilePicker ?: return
+        val next = when (current.gridColumns) { 3 -> 4; 4 -> 2; else -> 3 }
+        _state.value = current.copy(gridColumns = next)
+    }
+
     fun toggleDeleteAfterTransfer() {
         val current = _state.value as? TransferState.FilePicker ?: return
         _state.value = current.copy(deleteAfterTransfer = !current.deleteAfterTransfer)

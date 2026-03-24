@@ -9,6 +9,7 @@ sealed interface TransferState {
         val selectedHandles: Set<Int>,
         val cameraFreeBytes: Long? = null,
         val deleteAfterTransfer: Boolean = false,
+        val gridColumns: Int = 3,
     ) : TransferState
 
     data class Transferring(

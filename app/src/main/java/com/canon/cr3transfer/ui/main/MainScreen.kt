@@ -117,6 +117,10 @@ fun MainScreen(
                     onToggleFile = { viewModel.toggleFileSelection(it) },
                     onSelectAll = { viewModel.selectAll() },
                     onSelectNone = { viewModel.selectNone() },
+                    onSelectToday = { viewModel.selectToday() },
+                    onSelectThisWeek = { viewModel.selectThisWeek() },
+                    onSelectNew = { viewModel.selectNew() },
+                    onCycleGrid = { viewModel.cycleGridColumns() },
                     onToggleDeleteMode = { viewModel.toggleDeleteAfterTransfer() },
                     onStartTransfer = {
                         if (viewModel.checkStorageAndProceed()) onStartTransfer()
@@ -228,6 +232,10 @@ private fun FilePickerContent(
     onToggleFile: (Int) -> Unit,
     onSelectAll: () -> Unit,
     onSelectNone: () -> Unit,
+    onSelectToday: () -> Unit,
+    onSelectThisWeek: () -> Unit,
+    onSelectNew: () -> Unit,
+    onCycleGrid: () -> Unit,
     onToggleDeleteMode: () -> Unit,
     onStartTransfer: () -> Unit,
 ) {
@@ -257,21 +265,27 @@ private fun FilePickerContent(
     Column(modifier = Modifier.fillMaxSize()) {
         // Selection controls row
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("$selectedCount / $totalCount selected", style = MaterialTheme.typography.titleSmall)
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onSelectAll) { Text("All") }
                 TextButton(onClick = onSelectNone) { Text("None") }
+                TextButton(onClick = onSelectToday) { Text("Today") }
+                TextButton(onClick = onSelectThisWeek) { Text("Week") }
+                TextButton(onClick = onSelectNew) { Text("New") }
+                TextButton(onClick = onCycleGrid) {
+                    Text("${state.gridColumns}×", style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
 
         // SD card free space
         state.cameraFreeBytes?.let { freeBytes ->
             Text(
-                text = formatBytes(freeBytes),
+                text = formatCameraFreeBytes(freeBytes),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp),
@@ -294,7 +308,7 @@ private fun FilePickerContent(
 
         // Thumbnail grid
         LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
+            columns = GridCells.Fixed(state.gridColumns),
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -310,6 +324,9 @@ private fun FilePickerContent(
         }
 
         // Transfer button
+        val selectedBytes = state.files
+            .filter { it.objectHandle in state.selectedHandles }
+            .sumOf { it.sizeBytes }
         Button(
             onClick = {
                 if (state.deleteAfterTransfer) showDeleteConfirm = true
@@ -318,7 +335,9 @@ private fun FilePickerContent(
             enabled = selectedCount > 0,
             modifier = Modifier.fillMaxWidth().padding(16.dp),
         ) {
-            Text("Transfer $selectedCount ${if (selectedCount == 1) "file" else "files"}")
+            val label = "Transfer $selectedCount ${if (selectedCount == 1) "file" else "files"}"
+            val size = if (selectedCount > 0) " · ${formatBytes(selectedBytes)}" else ""
+            Text(label + size)
         }
     }
 }
@@ -516,9 +535,11 @@ private fun ErrorContent(state: TransferState.Error) {
 
 private fun formatBytes(bytes: Long): String {
     val gb = bytes / (1024.0 * 1024.0 * 1024.0)
-    return if (gb >= 1.0) String.format("%.1f GB free on camera SD", gb)
-    else String.format("%.0f MB free on camera SD", bytes / (1024.0 * 1024.0))
+    return if (gb >= 1.0) String.format("%.1f GB", gb)
+    else String.format("%.0f MB", bytes / (1024.0 * 1024.0))
 }
+
+private fun formatCameraFreeBytes(bytes: Long) = "${formatBytes(bytes)} free on camera SD"
 
 /** Returns date-named subdirectories of CanonImports that contain at least one CR3 file, newest first. */
 private fun findImportFolders(): List<java.io.File> {
