@@ -131,7 +131,6 @@ fun MainScreen(
                     onSelectToday = { viewModel.selectToday() },
                     onSelectThisWeek = { viewModel.selectThisWeek() },
                     onSelectNew = { viewModel.selectNew() },
-                    onCycleGrid = { viewModel.cycleGridColumns() },
                     onToggleDeleteMode = { viewModel.toggleDeleteAfterTransfer() },
                     onFileDetail = { viewModel.showFileDetail(it) },
                     onStartTransfer = {
@@ -262,7 +261,6 @@ private fun FilePickerContent(
     onSelectToday: () -> Unit,
     onSelectThisWeek: () -> Unit,
     onSelectNew: () -> Unit,
-    onCycleGrid: () -> Unit,
     onToggleDeleteMode: () -> Unit,
     onFileDetail: (CameraFile) -> Unit,
     onStartTransfer: () -> Unit,
@@ -291,20 +289,12 @@ private fun FilePickerContent(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Row 1: count + grid toggle
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("$selectedCount / $totalCount selected", style = MaterialTheme.typography.titleSmall)
-            TextButton(
-                onClick = onCycleGrid,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-            ) {
-                Text("${state.gridColumns} col", style = MaterialTheme.typography.labelMedium)
-            }
-        }
+        // Row 1: selection count
+        Text(
+            "$selectedCount / $totalCount selected",
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
         // Row 2: selection shortcuts
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),

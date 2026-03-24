@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,6 +63,18 @@ class MainViewModel @Inject constructor(
 
     private var scannedFiles: List<CameraFile> = emptyList()
     private var isConnecting = false
+
+    init {
+        // Keep FilePicker gridColumns in sync with Settings
+        appSettings.gridColumns
+            .onEach { cols ->
+                val current = _state.value
+                if (current is TransferState.FilePicker && current.gridColumns != cols) {
+                    _state.value = current.copy(gridColumns = cols)
+                }
+            }
+            .launchIn(viewModelScope)
+    }
 
     val files: List<CameraFile> get() = scannedFiles
 
@@ -246,13 +260,6 @@ class MainViewModel @Inject constructor(
                 .map { it.objectHandle }
                 .toSet()
         )
-    }
-
-    fun cycleGridColumns() {
-        val current = _state.value as? TransferState.FilePicker ?: return
-        val next = when (current.gridColumns) { 3 -> 4; 4 -> 2; else -> 3 }
-        _state.value = current.copy(gridColumns = next)
-        viewModelScope.launch { appSettings.setGridColumns(next) }
     }
 
     fun openSettings() { _showSettings.value = true }
