@@ -8,6 +8,7 @@ sealed interface TransferState {
         val files: List<CameraFile>,
         val selectedHandles: Set<Int>,
         val cameraFreeBytes: Long? = null,
+        val shutterCount: Int? = null,
         val deleteAfterTransfer: Boolean = false,
     ) : TransferState
 

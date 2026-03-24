@@ -123,12 +123,19 @@ class MainViewModel @Inject constructor(
                     selectedHandles = newHandles,
                 )
                 loadThumbnails(scannedFiles)
-                // Fetch camera free space concurrently
+                // Fetch camera free space and shutter count concurrently
                 viewModelScope.launch(Dispatchers.IO) {
                     val freeBytes = deviceManager.getCameraFreeBytes()
                     val current = _state.value
                     if (current is TransferState.FilePicker) {
                         _state.value = current.copy(cameraFreeBytes = freeBytes)
+                    }
+                }
+                viewModelScope.launch(Dispatchers.IO) {
+                    val count = deviceManager.getShutterCount()
+                    val current = _state.value
+                    if (current is TransferState.FilePicker) {
+                        _state.value = current.copy(shutterCount = count)
                     }
                 }
             } catch (e: Exception) {
