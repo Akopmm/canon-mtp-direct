@@ -6,6 +6,7 @@ import android.mtp.MtpDevice
 import android.os.Environment
 import android.util.Log
 import com.canon.cr3transfer.data.prefs.AppSettings
+import com.canon.cr3transfer.data.prefs.TransferHistoryDataStore
 import com.canon.cr3transfer.domain.model.CameraFile
 import com.canon.cr3transfer.domain.model.FileStatus
 import com.canon.cr3transfer.domain.model.FileTransferStatus
@@ -50,6 +51,7 @@ data class ImportedNamesCache(
 class MtpTransferRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val appSettings: AppSettings,
+    private val transferHistoryDataStore: TransferHistoryDataStore,
 ) {
     /** Single-file dedup check. Use [buildImportedNamesCache] when checking many files. */
     fun isAlreadyImported(fileName: String, fileType: FileType): Boolean {
@@ -84,6 +86,9 @@ class MtpTransferRepository @Inject constructor(
 
         // Build the dedup cache once instead of walking the filesystem per file
         val importedCache = buildImportedNamesCache()
+        // Also load DataStore-tracked originals (used when rename is enabled — filesystem names
+        // differ from original camera names so the cache alone can't detect duplicates)
+        val trackedOriginals = transferHistoryDataStore.transferredFiles.first()
 
         val statuses = files.map { file ->
             FileTransferStatus(
@@ -109,6 +114,7 @@ class MtpTransferRepository @Inject constructor(
             }
             val destFile = File(destDir, resolvedName)
             val alreadyTransferred = importedCache.contains(file.name, file.fileType)
+                || file.name in trackedOriginals
             Log.d(TAG, "File ${file.name}: alreadyImported=$alreadyTransferred")
 
             if (alreadyTransferred) {
@@ -158,6 +164,7 @@ class MtpTransferRepository @Inject constructor(
 
             if (success) {
                 seqCounter++
+                transferHistoryDataStore.markTransferred(file.name) // original camera name
                 statuses[index] = statuses[index].copy(status = FileStatus.DONE)
                 val elapsedMs = System.currentTimeMillis() - fileStartMs
                 if (elapsedMs > 0) {
