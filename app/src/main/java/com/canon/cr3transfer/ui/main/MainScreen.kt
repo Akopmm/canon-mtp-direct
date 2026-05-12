@@ -40,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -109,7 +110,10 @@ fun MainScreen(
         ) {
             when (val currentState = state) {
                 is TransferState.Idle -> IdleContent()
-                is TransferState.CameraConnected -> CameraConnectedContent()
+                is TransferState.CameraConnected -> CameraConnectedContent(
+                    cameraName = currentState.cameraName,
+                    onSaveCameraName = { viewModel.saveCameraName(it) },
+                )
                 is TransferState.Scanning -> ScanningContent(currentState)
                 is TransferState.FilePicker -> FilePickerContent(
                     state = currentState,
@@ -191,12 +195,45 @@ private fun IdleContent() {
 }
 
 @Composable
-private fun CameraConnectedContent() {
+private fun CameraConnectedContent(
+    cameraName: String?,
+    onSaveCameraName: (String) -> Unit,
+) {
+    var enteredName by remember { mutableStateOf("") }
+    val promptText = if (cameraName.isNullOrBlank()) {
+        "Please give this camera a friendly name. This will be used for the import folder."
+    } else {
+        "Connected to $cameraName"
+    }
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator()
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Camera Connected", style = MaterialTheme.typography.bodyLarge)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
+            if (cameraName.isNullOrBlank()) {
+                Text(promptText, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = enteredName,
+                    onValueChange = { enteredName = it },
+                    label = { Text("Camera name") },
+                    placeholder = { Text("e.g. Studio R8") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { onSaveCameraName(enteredName) }) {
+                    Text("Use this name")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(onClick = { onSaveCameraName("") }) {
+                    Text("Use default camera id")
+                }
+            } else {
+                CircularProgressIndicator()
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(promptText, style = MaterialTheme.typography.bodyLarge)
+            }
         }
     }
 }
@@ -527,13 +564,16 @@ private fun findImportFolders(): List<java.io.File> {
         "CanonImports",
     )
     if (!importDir.exists()) return emptyList()
-    return (importDir.listFiles() ?: return emptyList())
+
+    return importDir.walkTopDown()
         .filter { dir ->
-            dir.isDirectory && dir.walkTopDown().any { f ->
-                f.isFile && f.name.endsWith(".CR3", ignoreCase = true)
-            }
+            dir.isDirectory && dir != importDir &&
+                dir.listFiles()?.any { child ->
+                    child.isFile && child.name.endsWith(".CR3", ignoreCase = true)
+                } == true
         }
-        .sortedDescending()
+        .sortedWith(compareByDescending<java.io.File> { it.name }.thenByDescending { it.parentFile?.name })
+        .toList()
 }
 
 private fun launchLightroomImport(context: Context, folders: List<java.io.File>) {

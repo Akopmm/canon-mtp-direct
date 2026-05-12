@@ -2,7 +2,7 @@ package com.canon.cr3transfer.domain.model
 
 sealed interface TransferState {
     data object Idle : TransferState
-    data object CameraConnected : TransferState
+    data class CameraConnected(val cameraName: String? = null) : TransferState
     data class Scanning(val discoveredCount: Int = 0) : TransferState
     data class FilePicker(
         val files: List<CameraFile>,

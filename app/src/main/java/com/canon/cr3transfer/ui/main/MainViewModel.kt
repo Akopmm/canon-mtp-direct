@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.canon.cr3transfer.data.mtp.MtpDeviceManager
 import com.canon.cr3transfer.data.mtp.MtpTransferRepository
+import com.canon.cr3transfer.data.prefs.CameraNameRepository
 import com.canon.cr3transfer.data.prefs.TransferSessionRepository
 import com.canon.cr3transfer.domain.model.CameraFile
 import com.canon.cr3transfer.domain.model.TransferSession
@@ -26,6 +27,7 @@ class MainViewModel @Inject constructor(
     private val deviceManager: MtpDeviceManager,
     private val scanCameraUseCase: ScanCameraUseCase,
     private val transferRepository: MtpTransferRepository,
+    private val cameraNameRepository: CameraNameRepository,
     private val sessionRepository: TransferSessionRepository,
 ) : ViewModel() {
 
@@ -82,8 +84,17 @@ class MainViewModel @Inject constructor(
                     )
                     return@launch
                 }
-                _state.value = TransferState.CameraConnected
-                scanCamera()
+
+                val cameraId = deviceManager.cameraId
+                val savedName = if (cameraId != null) {
+                    withContext(Dispatchers.IO) { cameraNameRepository.getCameraName(cameraId) }
+                } else null
+                if (!savedName.isNullOrBlank()) {
+                    deviceManager.setCameraName(savedName)
+                    scanCamera()
+                } else {
+                    _state.value = TransferState.CameraConnected(cameraName = null)
+                }
             } finally {
                 isConnecting = false
             }
@@ -205,6 +216,18 @@ class MainViewModel @Inject constructor(
 
     fun closeHistory() {
         _showHistory.value = false
+    }
+
+    fun saveCameraName(name: String) {
+        val cameraId = deviceManager.cameraId
+        viewModelScope.launch {
+            deviceManager.setCameraName(name)
+            val cameraName = deviceManager.cameraName
+            if (!cameraId.isNullOrBlank() && !cameraName.isNullOrBlank()) {
+                cameraNameRepository.saveCameraName(cameraId, cameraName)
+            }
+            scanCamera()
+        }
     }
 
     fun updateState(newState: TransferState) {

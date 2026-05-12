@@ -46,6 +46,7 @@ data class ImportedNamesCache(
 @Singleton
 class MtpTransferRepository @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val deviceManager: MtpDeviceManager,
 ) {
     /** Single-file dedup check. Use [buildImportedNamesCache] when checking many files. */
     fun isAlreadyImported(fileName: String, fileType: FileType): Boolean {
@@ -159,7 +160,7 @@ class MtpTransferRepository @Inject constructor(
     private fun getPhotoDestDir(dateFolder: String): File {
         val publicDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
-            "CanonImports/$dateFolder"
+            "CanonImports/${cameraSubdirectory()}$dateFolder"
         )
         if (publicDir.mkdirs() || publicDir.isDirectory) {
             val testFile = File(publicDir, ".write_test")
@@ -169,7 +170,7 @@ class MtpTransferRepository @Inject constructor(
                 return publicDir
             } catch (_: Exception) { }
         }
-        val appDir = File(context.getExternalFilesDir(null), "CanonImports/photos/$dateFolder")
+        val appDir = File(context.getExternalFilesDir(null), "CanonImports/photos/${cameraSubdirectory()}$dateFolder")
         appDir.mkdirs()
         return appDir
     }
@@ -177,7 +178,7 @@ class MtpTransferRepository @Inject constructor(
     private fun getVideoDestDir(dateFolder: String): File {
         val publicDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
-            "CanonImports/$dateFolder"
+            "CanonImports/${cameraSubdirectory()}$dateFolder"
         )
         if (publicDir.mkdirs() || publicDir.isDirectory) {
             val testFile = File(publicDir, ".write_test")
@@ -187,30 +188,35 @@ class MtpTransferRepository @Inject constructor(
                 return publicDir
             } catch (_: Exception) { }
         }
-        val appDir = File(context.getExternalFilesDir(null), "CanonImports/videos/$dateFolder")
+        val appDir = File(context.getExternalFilesDir(null), "CanonImports/videos/${cameraSubdirectory()}$dateFolder")
         appDir.mkdirs()
         return appDir
     }
 
     val photoOutputDirectory: File
-        get() {
-            val publicDir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
-                "CanonImports"
-            )
-            return if (publicDir.isDirectory) publicDir
-            else File(context.getExternalFilesDir(null), "CanonImports/photos")
-        }
+        get() = resolveOutputRoot(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "CanonImports"),
+            File(context.getExternalFilesDir(null), "CanonImports/photos")
+        )
 
     val videoOutputDirectory: File
-        get() {
-            val publicDir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
-                "CanonImports"
-            )
-            return if (publicDir.isDirectory) publicDir
-            else File(context.getExternalFilesDir(null), "CanonImports/videos")
+        get() = resolveOutputRoot(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "CanonImports"),
+            File(context.getExternalFilesDir(null), "CanonImports/videos")
+        )
+
+    private fun resolveOutputRoot(publicBase: File, fallbackBase: File): File {
+        return if (publicBase.isDirectory) {
+            File(publicBase, cameraSubdirectory())
+        } else {
+            File(fallbackBase, cameraSubdirectory())
         }
+    }
+
+    private fun cameraSubdirectory(): String {
+        val cameraDirectoryName = deviceManager.cameraDirectoryName
+        return if (cameraDirectoryName.isNullOrBlank()) "" else "$cameraDirectoryName/"
+    }
 
     // Kept for backward compatibility — checks both dirs
     val outputDirectory: File get() = photoOutputDirectory
