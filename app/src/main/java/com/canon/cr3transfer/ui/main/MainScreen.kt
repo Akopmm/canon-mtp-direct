@@ -618,7 +618,7 @@ private fun FolderPickerDialog(
 ) {
     // Default: pre-select the most recent folder (first after sortedDescending)
     var selected by remember {
-        mutableStateOf(if (folders.isNotEmpty()) setOf(folders.first().name) else emptySet())
+        mutableStateOf(if (folders.isNotEmpty()) setOf(folders.first().absolutePath) else emptySet())
     }
 
     AlertDialog(
@@ -627,27 +627,29 @@ private fun FolderPickerDialog(
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                 items(folders) { folder ->
+                    val cameraName = folder.parentFile?.name ?: "Unknown"
+                    val displayLabel = "$cameraName / ${folder.name}"
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                selected = if (folder.name in selected) {
-                                    selected - folder.name
+                                selected = if (folder.absolutePath in selected) {
+                                    selected - folder.absolutePath
                                 } else {
-                                    selected + folder.name
+                                    selected + folder.absolutePath
                                 }
                             }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Checkbox(
-                            checked = folder.name in selected,
+                            checked = folder.absolutePath in selected,
                             onCheckedChange = { checked ->
-                                selected = if (checked) selected + folder.name else selected - folder.name
+                                selected = if (checked) selected + folder.absolutePath else selected - folder.absolutePath
                             },
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(folder.name, style = MaterialTheme.typography.bodyMedium)
+                        Text(displayLabel, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -655,7 +657,8 @@ private fun FolderPickerDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onConfirm(folders.filter { it.name in selected })
+                    // FIX: Check absolutePath instead of name
+                    onConfirm(folders.filter { it.absolutePath in selected })
                 },
                 enabled = selected.isNotEmpty(),
             ) { Text("Import") }
