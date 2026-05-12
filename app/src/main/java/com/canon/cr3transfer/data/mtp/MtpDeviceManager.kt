@@ -13,8 +13,14 @@ class MtpDeviceManager @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private var mtpDevice: MtpDevice? = null
+    private var usbDevice: UsbDevice? = null
+    private var cameraNameInternal: String? = null
 
     val device: MtpDevice? get() = mtpDevice
+    val cameraId: String? get() = usbDevice?.let { buildCameraId(it) }
+    val cameraName: String? get() = cameraNameInternal
+    val cameraDirectoryName: String?
+        get() = cameraNameInternal ?: cameraId
 
     val isConnected: Boolean get() = mtpDevice != null
 
@@ -25,6 +31,7 @@ class MtpDeviceManager @Inject constructor(
         val mtp = MtpDevice(usbDevice)
         return if (mtp.open(connection)) {
             mtpDevice = mtp
+            this.usbDevice = usbDevice
             true
         } else {
             connection.close()
@@ -51,6 +58,30 @@ class MtpDeviceManager @Inject constructor(
     fun close() {
         mtpDevice?.close()
         mtpDevice = null
+        usbDevice = null
+        cameraNameInternal = null
+    }
+
+    fun setCameraName(name: String?) {
+        cameraNameInternal = name
+            ?.trim()
+            ?.replace("[\\/:*?\"<>|]".toRegex(), "_")
+            ?.replace("\\s+".toRegex(), "_")
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun buildCameraId(device: UsbDevice): String {
+        val rawId = device.serialNumber
+            ?: device.productName
+            ?: device.deviceName
+            ?: "canon_${device.vendorId}_${device.productId}"
+
+        return rawId
+            .trim()
+            .replace("[\\/:*?\"<>|]".toRegex(), "_")
+            .replace("\\s+".toRegex(), "_")
+            .takeIf { it.isNotBlank() }
+            ?: "camera_${device.vendorId}_${device.productId}"
     }
 
     companion object {
