@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - CR3 Transfer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 20px;
+        }
+        
+        h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .last-updated {
+            color: #666;
+            font-style: italic;
+        }
+        
+        h2 {
+            color: #667eea;
+            font-size: 1.6em;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            border-left: 4px solid #764ba2;
+            padding-left: 15px;
+        }
+        
+        h3 {
+            color: #764ba2;
+            font-size: 1.2em;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        
+        p {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+        
+        ul, ol {
+            margin-left: 20px;
+            margin-bottom: 15px;
+        }
+        
+        li {
+            margin-bottom: 8px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: #f9f9f9;
+        }
+        
+        th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        tr:hover {
+            background: #f5f5f5;
+        }
+        
+        .highlight {
+            background: #fff3cd;
+            padding: 15px;
+            border-left: 4px solid #ffc107;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        .checklist {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+            font-size: 1.1em;
+        }
+        
+        .checkmark {
+            color: #28a745;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .crossmark {
+            color: #dc3545;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+        }
+        
+        .contact-info {
+            background: #f0f7ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #667eea;
+        }
+        
+        a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 1.8em;
+            }
+            
+            h2 {
+                font-size: 1.3em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Privacy Policy</h1>
+            <h2 style="border: none; color: #666; padding: 0; margin-top: 10px;">CR3 Transfer</h2>
+            <p class="last-updated">Last Updated: May 13, 2026</p>
+        </header>
+
+        <section>
+            <h2>Overview</h2>
+            <p>CR3 Transfer ("the App") is committed to protecting your privacy. This Privacy Policy explains how the App collects, uses, and protects your information.</p>
+        </section>
+
+        <section>
+            <h2>1. What Data We Collect</h2>
+            
+            <h3>Camera File Metadata</h3>
+            <p>The App reads file information from your Canon EOS R8 camera via USB-C connection, including:</p>
+            <ul>
+                <li>File names (e.g., IMG_1234.CR3)</li>
+                <li>File sizes</li>
+                <li>File timestamps (creation dates)</li>
+                <li>File format/type</li>
+            </ul>
+            <div class="highlight">
+                <strong>Important:</strong> The App never accesses file contents beyond what is necessary to identify CR3 and video files.
+            </div>
+            
+            <h3>Transfer History</h3>
+            <p>The App stores a local record of:</p>
+            <ul>
+                <li>Names of transferred files (for deduplication purposes)</li>
+                <li>Transfer dates and timestamps</li>
+                <li>Number of files successfully transferred</li>
+            </ul>
+            <p>This data is stored <strong>entirely on your device</strong> using Android DataStore.</p>
+            
+            <h3>Camera Identity</h3>
+            <p>The App stores optional user-defined labels for your camera:</p>
+            <ul>
+                <li>Camera nickname (e.g., "Studio R8")</li>
+                <li>Camera serial number (used internally for unique identification)</li>
+            </ul>
+            <p>This allows you to manage transfers from multiple cameras.</p>
+        </section>
+
+        <section>
+            <h2>2. How We Use Your Data</h2>
+            <p>The App uses collected data <strong>only</strong> for the following purposes:</p>
+            <ol>
+                <li><strong>File Transfer:</strong> To copy CR3 RAW files and MP4 videos from your camera to your device</li>
+                <li><strong>Deduplication:</strong> To avoid re-importing files you've already transferred</li>
+                <li><strong>Progress Tracking:</strong> To display transfer progress during file operations</li>
+                <li><strong>History Logging:</strong> To maintain a record of transfer sessions in the app's local storage</li>
+            </ol>
+            <p><strong>We do not use this data for:</strong></p>
+            <ul>
+                <li>Analytics or tracking</li>
+                <li>Marketing or advertising</li>
+                <li>Building user profiles</li>
+                <li>Selling or sharing with third parties</li>
+                <li>Any purpose other than the core functionality of the App</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>3. No External Networking</h2>
+            <p>The App is <strong>completely offline-first.</strong> It:</p>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Requires no internet connection to function</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Does not send any data to external servers</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Does not use cloud services</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Does not integrate with analytics platforms</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Does not make any network requests</span>
+            </div>
+            <p>All operations happen on your device and your camera only.</p>
+        </section>
+
+        <section>
+            <h2>4. Data Storage</h2>
+            
+            <h3>Local Storage</h3>
+            <p>All data is stored on your Android device using:</p>
+            <ul>
+                <li><strong>Android DataStore</strong> for preferences and transfer history</li>
+                <li><strong>Device file system</strong> for imported CR3 and MP4 files</li>
+            </ul>
+            
+            <h3>Transferred Files</h3>
+            <p>Imported files are saved to:</p>
+            <code>/sdcard/Pictures/CanonImports/[Camera Name]/[Date]/IMG_XXXX.CR3</code>
+            <p>You have full control over these files and can delete them at any time.</p>
+            
+            <h3>Data Retention</h3>
+            <ul>
+                <li>Transfer history: Kept indefinitely until manually cleared by the user</li>
+                <li>Camera names: Kept indefinitely until manually changed or cleared</li>
+                <li>Transferred file records: Kept indefinitely to prevent duplicate imports</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>5. Permissions Requested</h2>
+            <p>The App requests the following permissions and uses them for these reasons:</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Permission</th>
+                        <th>Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>MANAGE_EXTERNAL_STORAGE</code></td>
+                        <td>Access to Pictures folder for saving imported files</td>
+                    </tr>
+                    <tr>
+                        <td><code>READ_EXTERNAL_STORAGE</code></td>
+                        <td>Reading saved files for Lightroom import</td>
+                    </tr>
+                    <tr>
+                        <td><code>FOREGROUND_SERVICE</code></td>
+                        <td>Keep transfer running and display progress notification</td>
+                    </tr>
+                    <tr>
+                        <td><code>FOREGROUND_SERVICE_DATA_SYNC</code></td>
+                        <td>Classify the foreground service as data sync type</td>
+                    </tr>
+                    <tr>
+                        <td><code>POST_NOTIFICATIONS</code></td>
+                        <td>Send transfer progress and completion notifications</td>
+                    </tr>
+                    <tr>
+                        <td>USB Host permissions</td>
+                        <td>Communicate with Canon camera via USB-C</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>6. Camera Connection</h2>
+            <p>When you connect your Canon EOS R8:</p>
+            <ol>
+                <li>The App requests USB permission from Android</li>
+                <li>The App communicates directly with the camera via the MTP (Media Transfer Protocol)</li>
+                <li>No data leaves your device or camera</li>
+                <li>The connection is terminated when:
+                    <ul>
+                        <li>You disconnect the camera</li>
+                        <li>You close the App</li>
+                        <li>The device auto-disconnects due to inactivity</li>
+                    </ul>
+                </li>
+            </ol>
+        </section>
+
+        <section>
+            <h2>7. Third-Party Services</h2>
+            <p>The App includes integration with:</p>
+            <ul>
+                <li><strong>Lightroom Mobile:</strong> When you choose to import to Lightroom, the App opens Lightroom with the file URIs. No data is sent to Adobe except what Lightroom normally collects.</li>
+            </ul>
+            <p>The App does not integrate with any other third-party services.</p>
+        </section>
+
+        <section>
+            <h2>8. Data Security</h2>
+            <p>Your data is protected by:</p>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>No transmission over networks</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Local encryption via device storage (if enabled on your device)</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Direct USB communication with camera (no intermediaries)</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>No cloud synchronization or backup</span>
+            </div>
+        </section>
+
+        <section>
+            <h2>9. Children's Privacy</h2>
+            <p>The App is not intended for children under 13. We do not knowingly collect information from children under 13. If you believe we have collected information from a child, please contact us immediately.</p>
+        </section>
+
+        <section>
+            <h2>10. Changes to This Privacy Policy</h2>
+            <p>If we make material changes to this Privacy Policy, we will update this page and indicate the date of the last update. Your continued use of the App constitutes your acceptance of the updated Privacy Policy.</p>
+        </section>
+
+        <section>
+            <h2>11. Contact Us</h2>
+            <div class="contact-info">
+                <p>If you have questions or concerns about this Privacy Policy, please contact:</p>
+                <p><strong>Email:</strong> akopbabadzanan@gmail.com</p>
+                <p><strong>GitHub:</strong> <a href="https://github.com/Akopmm/canon-mtp-direct" target="_blank">https://github.com/Akopmm/canon-mtp-direct</a></p>
+            </div>
+        </section>
+
+        <section>
+            <h2>12. Additional Notes</h2>
+            
+            <h3>What We Collect vs. What We Don't</h3>
+            <p><strong>We Collect:</strong></p>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>File metadata from your camera (names, sizes, dates)</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Transfer history (stored locally on your device)</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Camera names you choose to set</span>
+            </div>
+            <div class="checklist">
+                <span class="checkmark">✓</span>
+                <span>Timestamps of operations</span>
+            </div>
+            
+            <p style="margin-top: 20px;"><strong>We Don't Collect:</strong></p>
+            <div class="checklist">
+                <span class="crossmark">✕</span>
+                <span>Personal information about you</span>
+            </div>
+            <div class="checklist">
+                <span class="crossmark">✕</span>
+                <span>Location data</span>
+            </div>
+            <div class="checklist">
+                <span class="crossmark">✕</span>
+                <span>Device identifiers (IMEI, IMSI, etc.)</span>
+            </div>
+            <div class="checklist">
+                <span class="crossmark">✕</span>
+                <span>Usage patterns or analytics</span>
+            </div>
+            <div class="checklist">
+                <span class="crossmark">✕</span>
+                <span>File contents (only metadata)</span>
+            </div>
+            <div class="checklist">
+                <span class="crossmark">✕</span>
+                <span>Network logs</span>
+            </div>
+            <div class="checklist">
+                <span class="crossmark">✕</span>
+                <span>Crash reports</span>
+            </div>
+            <div class="checklist">
+                <span class="crossmark">✕</span>
+                <span>Advertising tracking data</span>
+            </div>
+            
+            <h3 style="margin-top: 30px;">GDPR & Privacy Regulations</h3>
+            <p>This App is designed with privacy by default:</p>
+            <ul>
+                <li>No personal data processing</li>
+                <li>No cross-border data transfers</li>
+                <li>No third-party data sharing</li>
+                <li>Full user control over stored data</li>
+                <li>Easy data deletion (clear app data)</li>
+            </ul>
+        </section>
+
+        <footer>
+            <p><strong>This Privacy Policy is effective as of the date listed above and applies to all versions of the CR3 Transfer app.</strong></p>
+            <p style="margin-top: 15px;">© 2026 CR3 Transfer. All rights reserved.</p>
+        </footer>
+    </div>
+</body>
+</html>
