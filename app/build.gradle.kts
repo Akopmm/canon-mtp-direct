@@ -14,7 +14,7 @@ val localProps = Properties().apply {
 }
 
 android {
-    namespace = "com.canon.cr3transfer"
+    namespace = "com.akopmm.cr3transfer"
     compileSdk = 36
 
     signingConfigs {
@@ -27,11 +27,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.canon.cr3transfer"
+        applicationId = "com.akopmm.cr3transfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
