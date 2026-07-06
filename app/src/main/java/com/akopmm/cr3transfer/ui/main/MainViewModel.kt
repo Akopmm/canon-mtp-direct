@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @HiltViewModel
@@ -113,10 +114,26 @@ class MainViewModel @Inject constructor(
             _state.value = TransferState.Scanning()
             val discovered = mutableListOf<CameraFile>()
             try {
-                scanCameraUseCase().collect { file ->
-                    discovered.add(file)
-                    _state.value = TransferState.Scanning(discoveredCount = discovered.size)
+                // Set 60-second timeout for scanning (large video files can be slow)
+                withTimeoutOrNull(60_000L) {
+                    scanCameraUseCase().collect { file ->
+                        discovered.add(file)
+                        _state.value = TransferState.Scanning(discoveredCount = discovered.size)
+                    }
+                } ?: run {
+                    // Timeout occurred
+                    android.util.Log.w("CR3Transfer", "Scan timeout after 60s - ${discovered.size} files discovered")
+                    if (discovered.isNotEmpty()) {
+                        // Use what we found so far
+                        android.util.Log.i("CR3Transfer", "Continuing with ${discovered.size} discovered files")
+                    } else {
+                        _state.value = TransferState.Error(
+                            message = "Camera scan timed out. Try reconnecting or check camera USB mode."
+                        )
+                        return@launch
+                    }
                 }
+                
                 scannedFiles = discovered
                 if (scannedFiles.isEmpty()) {
                     _state.value = TransferState.Done(transferred = 0, skipped = 0, failed = 0)
@@ -143,7 +160,10 @@ class MainViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                _state.value = TransferState.Error(message = e.message ?: "Failed to scan camera")
+                android.util.Log.e("CR3Transfer", "Scan failed: ${e.message}", e)
+                _state.value = TransferState.Error(
+                    message = e.message ?: "Failed to scan camera"
+                )
             }
         }
     }
@@ -151,21 +171,29 @@ class MainViewModel @Inject constructor(
     private fun loadThumbnails(files: List<CameraFile>) {
         viewModelScope.launch {
             for (file in files) {
-                val thumb = withContext(Dispatchers.IO) {
-                    deviceManager.getThumbnail(file.objectHandle)
-                }
-                if (thumb != null && thumb.isNotEmpty()) {
-                    // Validate thumbnail is valid JPEG (magic bytes FF D8)
-                    if (thumb.size > 2 && 
-                        thumb[0].toInt() and 0xFF == 0xFF &&
-                        thumb[1].toInt() and 0xFF == 0xD8) {
-                        _thumbnails.value = _thumbnails.value + (file.objectHandle to thumb)
-                        android.util.Log.d("CR3Transfer", "Loaded valid thumbnail for ${file.name}")
-                    } else {
-                        android.util.Log.w("CR3Transfer", "Thumbnail for ${file.name} has invalid format (size=${thumb.size}, start=${thumb.take(4)})")
+                try {
+                    val thumb = withContext(Dispatchers.IO) {
+                        // 5-second timeout per thumbnail (large videos might fail)
+                        withTimeoutOrNull(5_000L) {
+                            deviceManager.getThumbnail(file.objectHandle)
+                        }
                     }
-                } else {
-                    android.util.Log.d("CR3Transfer", "No thumbnail data for ${file.name}")
+                    if (thumb != null && thumb.isNotEmpty()) {
+                        // Validate thumbnail is valid JPEG (magic bytes FF D8)
+                        if (thumb.size > 2 && 
+                            thumb[0].toInt() and 0xFF == 0xFF &&
+                            thumb[1].toInt() and 0xFF == 0xD8) {
+                            _thumbnails.value = _thumbnails.value + (file.objectHandle to thumb)
+                            android.util.Log.d("CR3Transfer", "Loaded valid thumbnail for ${file.name}")
+                        } else {
+                            android.util.Log.w("CR3Transfer", "Thumbnail for ${file.name} has invalid format (size=${thumb.size})")
+                        }
+                    } else {
+                        android.util.Log.d("CR3Transfer", "No thumbnail data for ${file.name}")
+                    }
+                } catch (e: Exception) {
+                    // Skip thumbnail for this file if loading fails
+                    android.util.Log.w("CR3Transfer", "Failed to load thumbnail for ${file.name}: ${e.message}")
                 }
             }
         }
