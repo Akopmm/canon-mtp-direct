@@ -154,8 +154,18 @@ class MainViewModel @Inject constructor(
                 val thumb = withContext(Dispatchers.IO) {
                     deviceManager.getThumbnail(file.objectHandle)
                 }
-                if (thumb != null) {
-                    _thumbnails.value = _thumbnails.value + (file.objectHandle to thumb)
+                if (thumb != null && thumb.isNotEmpty()) {
+                    // Validate thumbnail is valid JPEG (magic bytes FF D8)
+                    if (thumb.size > 2 && 
+                        thumb[0].toInt() and 0xFF == 0xFF &&
+                        thumb[1].toInt() and 0xFF == 0xD8) {
+                        _thumbnails.value = _thumbnails.value + (file.objectHandle to thumb)
+                        android.util.Log.d("CR3Transfer", "Loaded valid thumbnail for ${file.name}")
+                    } else {
+                        android.util.Log.w("CR3Transfer", "Thumbnail for ${file.name} has invalid format (size=${thumb.size}, start=${thumb.take(4)})")
+                    }
+                } else {
+                    android.util.Log.d("CR3Transfer", "No thumbnail data for ${file.name}")
                 }
             }
         }

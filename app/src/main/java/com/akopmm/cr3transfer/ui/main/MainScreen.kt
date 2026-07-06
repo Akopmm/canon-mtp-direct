@@ -377,9 +377,23 @@ private fun FileThumbnail(
             .border(borderWidth, borderColor, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
     ) {
-        if (thumbnailData != null) {
+        if (thumbnailData != null && thumbnailData.isNotEmpty()) {
             val bitmap = remember(thumbnailData) {
-                BitmapFactory.decodeByteArray(thumbnailData, 0, thumbnailData.size)
+                try {
+                    // Validate thumbnail data starts with JPEG magic bytes (FF D8)
+                    if (thumbnailData.size > 2 && 
+                        thumbnailData[0].toInt() and 0xFF == 0xFF &&
+                        thumbnailData[1].toInt() and 0xFF == 0xD8) {
+                        BitmapFactory.decodeByteArray(thumbnailData, 0, thumbnailData.size)
+                    } else {
+                        // Invalid format, return null to use placeholder
+                        null
+                    }
+                } catch (e: Exception) {
+                    // Decoding failed, return null to use placeholder
+                    android.util.Log.d("CR3Transfer", "Thumbnail decode failed for ${file.name}: ${e.message}")
+                    null
+                }
             }
             if (bitmap != null) {
                 Image(
