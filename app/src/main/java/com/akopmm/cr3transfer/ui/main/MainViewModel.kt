@@ -10,9 +10,11 @@ import com.akopmm.cr3transfer.data.mtp.MtpTransferRepository
 import com.akopmm.cr3transfer.data.prefs.CameraNameRepository
 import com.akopmm.cr3transfer.data.prefs.TransferSessionRepository
 import com.akopmm.cr3transfer.domain.model.CameraFile
+import com.akopmm.cr3transfer.domain.model.FileType
 import com.akopmm.cr3transfer.domain.model.TransferSession
 import com.akopmm.cr3transfer.domain.model.TransferState
 import com.akopmm.cr3transfer.domain.usecase.ScanCameraUseCase
+import com.akopmm.cr3transfer.util.ThumbnailUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -135,6 +137,7 @@ class MainViewModel @Inject constructor(
                 }
                 
                 scannedFiles = discovered
+                android.util.Log.d("CR3Transfer", "scanCamera: finished with ${scannedFiles.size} files: ${scannedFiles.map { it.name }}")
                 if (scannedFiles.isEmpty()) {
                     _state.value = TransferState.Done(transferred = 0, skipped = 0, failed = 0)
                     return@launch
@@ -146,6 +149,7 @@ class MainViewModel @Inject constructor(
                         .map { it.objectHandle }
                         .toSet()
                 }
+                android.util.Log.d("CR3Transfer", "scanCamera: creating FilePicker with ${scannedFiles.size} files, ${newHandles.size} selected")
                 _state.value = TransferState.FilePicker(
                     files = scannedFiles,
                     selectedHandles = newHandles,
@@ -172,30 +176,74 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             for (file in files) {
                 try {
-                    val thumb = withContext(Dispatchers.IO) {
-                        // 5-second timeout per thumbnail (large videos might fail)
-                        withTimeoutOrNull(5_000L) {
-                            deviceManager.getThumbnail(file.objectHandle)
-                        }
-                    }
-                    if (thumb != null && thumb.isNotEmpty()) {
-                        // Validate thumbnail is valid JPEG (magic bytes FF D8)
-                        if (thumb.size > 2 && 
-                            thumb[0].toInt() and 0xFF == 0xFF &&
-                            thumb[1].toInt() and 0xFF == 0xD8) {
-                            _thumbnails.value = _thumbnails.value + (file.objectHandle to thumb)
-                            android.util.Log.d("CR3Transfer", "Loaded valid thumbnail for ${file.name}")
-                        } else {
-                            android.util.Log.w("CR3Transfer", "Thumbnail for ${file.name} has invalid format (size=${thumb.size})")
-                        }
-                    } else {
-                        android.util.Log.d("CR3Transfer", "No thumbnail data for ${file.name}")
+                    // Primary: the camera's embedded MTP thumbnail.
+                    if (loadMtpThumbnail(file)) continue
+                    // Fallback (CR3 only): pull the preview JPEG straight out of the file header.
+                    // Covers cameras that expose no usable MTP thumbnail for RAW files.
+                    if (file.fileType == FileType.CR3) {
+                        loadEmbeddedCr3Preview(file)
                     }
                 } catch (e: Exception) {
                     // Skip thumbnail for this file if loading fails
                     android.util.Log.w("CR3Transfer", "Failed to load thumbnail for ${file.name}: ${e.message}")
                 }
             }
+        }
+    }
+
+    /** Returns true if a usable thumbnail was stored from the MTP GetThumb operation. */
+    private suspend fun loadMtpThumbnail(file: CameraFile): Boolean {
+        val thumb = withContext(Dispatchers.IO) {
+            // 5-second timeout per thumbnail (large videos might fail)
+            withTimeoutOrNull(5_000L) {
+                deviceManager.getThumbnail(file.objectHandle)
+            }
+        }
+        if (thumb == null || thumb.isEmpty()) {
+            android.util.Log.d(
+                "CR3Transfer",
+                "No MTP thumbnail for ${file.name} (${deviceManager.getThumbnailDiag(file.objectHandle)})"
+            )
+            return false
+        }
+        // Canon CR3 thumbnails may have a proprietary prefix before the JPEG SOI marker. Scan
+        // for FF D8 and store the JPEG portion so BitmapFactory decodes clean data (fixes both
+        // "QR code" noise and blank placeholders).
+        val jpeg = ThumbnailUtils.extractJpeg(thumb)
+        if (jpeg == null) {
+            android.util.Log.w(
+                "CR3Transfer",
+                "No JPEG marker in MTP thumbnail for ${file.name} " +
+                    "(size=${thumb.size} head=[${ThumbnailUtils.hexPreview(thumb)}] " +
+                    "${deviceManager.getThumbnailDiag(file.objectHandle)})"
+            )
+            return false
+        }
+        _thumbnails.value = _thumbnails.value + (file.objectHandle to jpeg)
+        android.util.Log.d("CR3Transfer", "Loaded MTP thumbnail for ${file.name} (raw=${thumb.size}B jpeg=${jpeg.size}B)")
+        return true
+    }
+
+    /** Fallback: read the CR3 header via partial MTP read and extract the embedded preview JPEG. */
+    private suspend fun loadEmbeddedCr3Preview(file: CameraFile) {
+        val head = withContext(Dispatchers.IO) {
+            withTimeoutOrNull(8_000L) {
+                deviceManager.readObjectHead(file.objectHandle, CR3_HEAD_READ_BYTES)
+            }
+        }
+        if (head == null || head.isEmpty()) {
+            android.util.Log.w("CR3Transfer", "No header bytes for CR3 fallback: ${file.name}")
+            return
+        }
+        val embedded = ThumbnailUtils.extractEmbeddedJpeg(head)
+        if (embedded != null) {
+            _thumbnails.value = _thumbnails.value + (file.objectHandle to embedded)
+            android.util.Log.d("CR3Transfer", "Loaded embedded CR3 preview for ${file.name} (${embedded.size}B from ${head.size}B head)")
+        } else {
+            android.util.Log.w(
+                "CR3Transfer",
+                "No embedded JPEG in first ${head.size}B of ${file.name} (head=[${ThumbnailUtils.hexPreview(head)}])"
+            )
         }
     }
 
@@ -281,5 +329,10 @@ class MainViewModel @Inject constructor(
         val gb = bytes / (1024.0 * 1024.0 * 1024.0)
         return if (gb >= 1.0) String.format("%.1f GB", gb)
         else String.format("%.0f MB", bytes / (1024.0 * 1024.0))
+    }
+
+    private companion object {
+        // The embedded THMB/Exif preview lives in the CR3 header, well before the RAW payload.
+        private const val CR3_HEAD_READ_BYTES = 512 * 1024
     }
 }

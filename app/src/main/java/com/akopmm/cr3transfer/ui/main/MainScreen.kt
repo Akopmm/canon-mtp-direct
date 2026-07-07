@@ -79,6 +79,7 @@ import com.akopmm.cr3transfer.ui.components.CameraSetupGuide
 import com.akopmm.cr3transfer.ui.components.FileProgressItem
 import com.akopmm.cr3transfer.ui.components.OverallProgressBar
 import com.akopmm.cr3transfer.ui.components.TransferHistorySheet
+import com.akopmm.cr3transfer.util.ThumbnailUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -380,13 +381,12 @@ private fun FileThumbnail(
         if (thumbnailData != null && thumbnailData.isNotEmpty()) {
             val bitmap = remember(thumbnailData) {
                 try {
-                    // Validate thumbnail data starts with JPEG magic bytes (FF D8)
-                    if (thumbnailData.size > 2 && 
-                        thumbnailData[0].toInt() and 0xFF == 0xFF &&
-                        thumbnailData[1].toInt() and 0xFF == 0xD8) {
-                        BitmapFactory.decodeByteArray(thumbnailData, 0, thumbnailData.size)
+                    // Bytes are already trimmed to the JPEG in the ViewModel; extractJpeg is a
+                    // cheap defensive no-op that also tolerates a leading prefix just in case.
+                    val jpeg = ThumbnailUtils.extractJpeg(thumbnailData)
+                    if (jpeg != null) {
+                        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
                     } else {
-                        // Invalid format, return null to use placeholder
                         null
                     }
                 } catch (e: Exception) {

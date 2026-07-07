@@ -48,6 +48,40 @@ class MtpDeviceManager @Inject constructor(
         return mtpDevice?.getThumbnail(objectHandle)
     }
 
+    /**
+     * What the camera advertises for this object's embedded thumbnail. Diagnostic only —
+     * lets us see whether the R8 reports a thumbnail at all and in which format for CR3.
+     */
+    fun getThumbnailDiag(objectHandle: Int): String {
+        val info = mtpDevice?.getObjectInfo(objectHandle) ?: return "objectInfo=null"
+        val fmt = info.thumbFormat
+        return "thumbFormat=0x${Integer.toHexString(fmt)} " +
+            "thumbCompressedSize=${info.thumbCompressedSize} " +
+            "thumbPix=${info.thumbPixWidth}x${info.thumbPixHeight}"
+    }
+
+    /**
+     * Reads up to [maxBytes] from the start of an object via an MTP partial read. Used to pull
+     * the embedded preview JPEG out of a CR3 header when [getThumbnail] yields nothing usable.
+     * Returns null if the camera doesn't support partial reads (GetPartialObject) or on error.
+     * MUST be called on Dispatchers.IO.
+     */
+    fun readObjectHead(objectHandle: Int, maxBytes: Int): ByteArray? {
+        val device = mtpDevice ?: return null
+        return try {
+            val buffer = ByteArray(maxBytes)
+            val read = device.getPartialObject(objectHandle, 0L, maxBytes.toLong(), buffer)
+            when {
+                read <= 0L -> null
+                read.toInt() == maxBytes -> buffer
+                else -> buffer.copyOf(read.toInt())
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("CR3Transfer", "getPartialObject failed for handle $objectHandle: ${e.message}")
+            null
+        }
+    }
+
     fun getCameraFreeBytes(): Long? {
         val ids = mtpDevice?.storageIds ?: return null
         if (ids.isEmpty()) return null
