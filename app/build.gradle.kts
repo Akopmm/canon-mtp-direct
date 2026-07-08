@@ -30,8 +30,8 @@ android {
         applicationId = "com.akopmm.cr3transfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.4"
+        versionCode = 5
+        versionName = "1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -41,10 +41,19 @@ object ThumbnailUtils {
     /**
      * Extracts the first complete embedded JPEG (FF D8 FF ... FF D9) of at least [minSize] bytes
      * from a byte range — e.g. the head of a CR3 file. CR3 is an ISOBMFF container; the first
-     * embedded JPEG near the start is the camera's THMB / Exif preview. Returns null if none is
-     * found (or the JPEG was truncated by the read window).
+     * embedded JPEG near the start is the camera's THMB / Exif preview.
+     *
+     * [accept] lets the caller reject false positives: `FF D8 FF … FF D9` byte runs occur by
+     * chance inside binary payloads (notably the HEVC preview in an HDR-PQ CR3, which has no real
+     * JPEG preview). Pass a validator that actually decodes the candidate; scanning then continues
+     * past a bad match to the next SOI instead of returning garbage. Returns null if no accepted
+     * JPEG is found (or it was truncated by the read window).
      */
-    fun extractEmbeddedJpeg(data: ByteArray?, minSize: Int = 1024): ByteArray? {
+    fun extractEmbeddedJpeg(
+        data: ByteArray?,
+        minSize: Int = 1024,
+        accept: (ByteArray) -> Boolean = { true },
+    ): ByteArray? {
         if (data == null || data.size < minSize) return null
         var i = 0
         val last = data.size - 2
@@ -55,9 +64,10 @@ object ThumbnailUtils {
             ) {
                 val eoi = findEoi(data, i + 2)
                 if (eoi != -1 && eoi - i + 1 >= minSize) {
-                    return data.copyOfRange(i, eoi + 1)
+                    val candidate = data.copyOfRange(i, eoi + 1)
+                    if (accept(candidate)) return candidate
                 }
-                i += 2 // truncated or too small — look for the next SOI
+                i += 2 // truncated, too small, or rejected — look for the next SOI
             } else {
                 i++
             }

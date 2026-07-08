@@ -183,6 +183,12 @@ class MtpFileEnumerator @Inject constructor() {
             val name = info.name ?: return null
             val type = when {
                 name.endsWith(".CR3", ignoreCase = true) -> FileType.CR3
+                name.endsWith(".JPG", ignoreCase = true) ||
+                    name.endsWith(".JPEG", ignoreCase = true) -> FileType.JPG
+                // Canon writes HEIF (HDR PQ) shots with a .HIF extension; accept .HEIF/.HEIC too.
+                name.endsWith(".HIF", ignoreCase = true) ||
+                    name.endsWith(".HEIF", ignoreCase = true) ||
+                    name.endsWith(".HEIC", ignoreCase = true) -> FileType.HEIF
                 name.endsWith(".MP4", ignoreCase = true) -> FileType.MP4
                 else -> return null
             }

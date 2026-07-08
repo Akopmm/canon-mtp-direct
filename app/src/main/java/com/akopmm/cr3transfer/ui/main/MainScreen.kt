@@ -457,7 +457,12 @@ private fun PlaceholderThumbnail(fileType: FileType) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = if (fileType == FileType.MP4) "MP4" else "CR3",
+            text = when (fileType) {
+                FileType.CR3 -> "CR3"
+                FileType.JPG -> "JPG"
+                FileType.HEIF -> "HEIF"
+                FileType.MP4 -> "MP4"
+            },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

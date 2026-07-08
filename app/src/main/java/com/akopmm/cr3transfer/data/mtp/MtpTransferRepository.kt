@@ -40,7 +40,7 @@ data class ImportedNamesCache(
     val videoNames: Set<String>,
 ) {
     fun contains(fileName: String, fileType: FileType): Boolean =
-        if (fileType == FileType.MP4) fileName in videoNames else fileName in photoNames
+        if (fileType.isVideo) fileName in videoNames else fileName in photoNames
 }
 
 @Singleton
@@ -50,7 +50,7 @@ class MtpTransferRepository @Inject constructor(
 ) {
     /** Single-file dedup check. Use [buildImportedNamesCache] when checking many files. */
     fun isAlreadyImported(fileName: String, fileType: FileType): Boolean {
-        val root = if (fileType == FileType.MP4) videoOutputDirectory else photoOutputDirectory
+        val root = if (fileType.isVideo) videoOutputDirectory else photoOutputDirectory
         return root.walkTopDown().any { it.isFile && it.name == fileName }
     }
 
@@ -90,10 +90,7 @@ class MtpTransferRepository @Inject constructor(
         var completed = 0
 
         for ((index, file) in files.withIndex()) {
-            val destDir = when (file.fileType) {
-                FileType.CR3 -> getPhotoDestDir(dateFolder)
-                FileType.MP4 -> getVideoDestDir(dateFolder)
-            }
+            val destDir = if (file.fileType.isVideo) getVideoDestDir(dateFolder) else getPhotoDestDir(dateFolder)
             val destFile = File(destDir, file.name)
             val alreadyTransferred = importedCache.contains(file.name, file.fileType)
             Log.d(TAG, "File ${file.name}: alreadyImported=$alreadyTransferred")
@@ -116,6 +113,8 @@ class MtpTransferRepository @Inject constructor(
                     if (imported && destFile.exists() && destFile.length() > 0) {
                         val mimeType = when (file.fileType) {
                             FileType.CR3 -> "image/x-canon-cr3"
+                            FileType.JPG -> "image/jpeg"
+                            FileType.HEIF -> "image/heif"
                             FileType.MP4 -> "video/mp4"
                         }
                         MediaScannerConnection.scanFile(

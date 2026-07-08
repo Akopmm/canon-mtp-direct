@@ -1,5 +1,6 @@
 package com.akopmm.cr3transfer.ui.main
 
+import android.graphics.BitmapFactory
 import android.hardware.usb.UsbDevice
 import android.os.Environment
 import android.os.StatFs
@@ -219,6 +220,18 @@ class MainViewModel @Inject constructor(
             )
             return false
         }
+        // The R8's HDR-PQ shots report a JFIF thumbnail that is actually a 10-bit HEIF stream —
+        // it carries an FF D8 marker but won't decode. Verify it renders before storing so we fall
+        // through to the header-preview fallback instead of showing a broken tile.
+        if (!decodesToBitmap(jpeg)) {
+            android.util.Log.w(
+                "CR3Transfer",
+                "MTP thumbnail for ${file.name} has FF D8 but won't decode " +
+                    "(jpeg=${jpeg.size}B head=[${ThumbnailUtils.hexPreview(jpeg)}] " +
+                    "${deviceManager.getThumbnailDiag(file.objectHandle)})"
+            )
+            return false
+        }
         _thumbnails.value = _thumbnails.value + (file.objectHandle to jpeg)
         android.util.Log.d("CR3Transfer", "Loaded MTP thumbnail for ${file.name} (raw=${thumb.size}B jpeg=${jpeg.size}B)")
         return true
@@ -235,15 +248,33 @@ class MainViewModel @Inject constructor(
             android.util.Log.w("CR3Transfer", "No header bytes for CR3 fallback: ${file.name}")
             return
         }
-        val embedded = ThumbnailUtils.extractEmbeddedJpeg(head)
+        // Only accept a candidate that actually decodes. In an HDR-PQ CR3 the preview is HEVC, not
+        // JPEG, so stray FF D8…FF D9 runs in the binary would otherwise be stored as a blank tile.
+        val embedded = ThumbnailUtils.extractEmbeddedJpeg(head, accept = ::decodesToBitmap)
         if (embedded != null) {
             _thumbnails.value = _thumbnails.value + (file.objectHandle to embedded)
             android.util.Log.d("CR3Transfer", "Loaded embedded CR3 preview for ${file.name} (${embedded.size}B from ${head.size}B head)")
         } else {
             android.util.Log.w(
                 "CR3Transfer",
-                "No embedded JPEG in first ${head.size}B of ${file.name} (head=[${ThumbnailUtils.hexPreview(head)}])"
+                "No decodable embedded JPEG in first ${head.size}B of ${file.name} " +
+                    "(head=[${ThumbnailUtils.hexPreview(head)}]) — likely HDR-PQ HEVC preview, showing placeholder"
             )
+        }
+    }
+
+    /**
+     * True if [bytes] decode to a real raster (bounds-only decode, no full allocation). Used to
+     * reject streams that carry a JPEG marker but aren't decodable JPEGs — e.g. the R8's HDR-PQ
+     * HEVC previews — so we never store a blank thumbnail.
+     */
+    private fun decodesToBitmap(bytes: ByteArray): Boolean {
+        return try {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+            opts.outWidth > 0 && opts.outHeight > 0
+        } catch (e: Throwable) {
+            false
         }
     }
 
