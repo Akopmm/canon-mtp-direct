@@ -41,6 +41,11 @@ class MainViewModel @Inject constructor(
     private val _thumbnails = MutableStateFlow<Map<Int, ByteArray>>(emptyMap())
     val thumbnails: StateFlow<Map<Int, ByteArray>> = _thumbnails.asStateFlow()
 
+    // Handles of HDR-PQ CR3 shots whose HEVC preview can't be decoded on Android (shown with an
+    // "HDR" placeholder). See loadEmbeddedCr3Preview.
+    private val _hdrHandles = MutableStateFlow<Set<Int>>(emptySet())
+    val hdrHandles: StateFlow<Set<Int>> = _hdrHandles.asStateFlow()
+
     private val _showHistory = MutableStateFlow(false)
     val showHistory: StateFlow<Boolean> = _showHistory.asStateFlow()
 
@@ -109,6 +114,7 @@ class MainViewModel @Inject constructor(
         deviceManager.close()
         scannedFiles = emptyList()
         _thumbnails.value = emptyMap()
+        _hdrHandles.value = emptySet()
         _state.value = TransferState.Idle
     }
 
@@ -174,6 +180,7 @@ class MainViewModel @Inject constructor(
     }
 
     private fun loadThumbnails(files: List<CameraFile>) {
+        _hdrHandles.value = emptySet()
         viewModelScope.launch {
             for (file in files) {
                 try {
@@ -248,19 +255,23 @@ class MainViewModel @Inject constructor(
             android.util.Log.w("CR3Transfer", "No header bytes for CR3 fallback: ${file.name}")
             return
         }
-        // Only accept a candidate that actually decodes. In an HDR-PQ CR3 the preview is HEVC, not
-        // JPEG, so stray FF D8…FF D9 runs in the binary would otherwise be stored as a blank tile.
+        // Tier 1: a normal CR3 carries a JPEG preview in its header. Only accept a candidate that
+        // actually decodes — an HDR-PQ CR3's HEVC binary has stray FF D8…FF D9 runs that aren't JPEG.
         val embedded = ThumbnailUtils.extractEmbeddedJpeg(head, accept = ::decodesToBitmap)
         if (embedded != null) {
             _thumbnails.value = _thumbnails.value + (file.objectHandle to embedded)
             android.util.Log.d("CR3Transfer", "Loaded embedded CR3 preview for ${file.name} (${embedded.size}B from ${head.size}B head)")
-        } else {
-            android.util.Log.w(
-                "CR3Transfer",
-                "No decodable embedded JPEG in first ${head.size}B of ${file.name} " +
-                    "(head=[${ThumbnailUtils.hexPreview(head)}]) — likely HDR-PQ HEVC preview, showing placeholder"
-            )
+            return
         }
+        // No JPEG preview means this is an HDR-PQ CR3: its preview is 10-bit HEVC (Range Extensions
+        // 4:2:2), which Android's HEVC decoders don't support, so it can't be rendered on-device.
+        // Flag it so the grid shows a distinct "HDR" placeholder instead of a generic one. (The file
+        // itself still imports fine.)
+        _hdrHandles.value = _hdrHandles.value + file.objectHandle
+        android.util.Log.i(
+            "CR3Transfer",
+            "HDR-PQ CR3 ${file.name}: no JPEG preview (HEVC 4:2:2, not Android-decodable) — HDR placeholder"
+        )
     }
 
     /**

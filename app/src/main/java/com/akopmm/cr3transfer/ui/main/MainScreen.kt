@@ -89,6 +89,7 @@ fun MainScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val thumbnails by viewModel.thumbnails.collectAsState()
+    val hdrHandles by viewModel.hdrHandles.collectAsState()
     val showHistory by viewModel.showHistory.collectAsState()
     val sessionHistory by viewModel.sessionHistory.collectAsState()
 
@@ -119,6 +120,7 @@ fun MainScreen(
                 is TransferState.FilePicker -> FilePickerContent(
                     state = currentState,
                     thumbnails = thumbnails,
+                    hdrHandles = hdrHandles,
                     onToggleFile = { viewModel.toggleFileSelection(it) },
                     onSelectAll = { viewModel.selectAll() },
                     onSelectNone = { viewModel.selectNone() },
@@ -263,6 +265,7 @@ private fun ScanningContent(state: TransferState.Scanning) {
 private fun FilePickerContent(
     state: TransferState.FilePicker,
     thumbnails: Map<Int, ByteArray>,
+    hdrHandles: Set<Int>,
     onToggleFile: (Int) -> Unit,
     onSelectAll: () -> Unit,
     onSelectNone: () -> Unit,
@@ -341,6 +344,7 @@ private fun FilePickerContent(
                 FileThumbnail(
                     file = file,
                     thumbnailData = thumbnails[file.objectHandle],
+                    isHdr = file.objectHandle in hdrHandles,
                     isSelected = file.objectHandle in state.selectedHandles,
                     onClick = { onToggleFile(file.objectHandle) },
                 )
@@ -365,6 +369,7 @@ private fun FilePickerContent(
 private fun FileThumbnail(
     file: CameraFile,
     thumbnailData: ByteArray?,
+    isHdr: Boolean,
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -403,10 +408,10 @@ private fun FileThumbnail(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                PlaceholderThumbnail(file.fileType)
+                PlaceholderThumbnail(file.fileType, isHdr)
             }
         } else {
-            PlaceholderThumbnail(file.fileType)
+            PlaceholderThumbnail(file.fileType, isHdr)
         }
 
         // Video play icon overlay
@@ -451,21 +456,38 @@ private fun FileThumbnail(
 }
 
 @Composable
-private fun PlaceholderThumbnail(fileType: FileType) {
+private fun PlaceholderThumbnail(fileType: FileType, isHdr: Boolean = false) {
     Box(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = when (fileType) {
-                FileType.CR3 -> "CR3"
-                FileType.JPG -> "JPG"
-                FileType.HEIF -> "HEIF"
-                FileType.MP4 -> "MP4"
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (isHdr && fileType == FileType.CR3) {
+            // HDR-PQ RAW: no preview is decodable on Android (10-bit HEVC 4:2:2). Show a distinct
+            // "HDR" tile so these shots are still identifiable in the grid.
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "HDR",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = "CR3",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            Text(
+                text = when (fileType) {
+                    FileType.CR3 -> "CR3"
+                    FileType.JPG -> "JPG"
+                    FileType.HEIF -> "HEIF"
+                    FileType.MP4 -> "MP4"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
