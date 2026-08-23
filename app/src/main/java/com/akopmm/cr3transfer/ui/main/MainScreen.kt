@@ -150,7 +150,7 @@ fun MainScreen(
 private fun IdleContent() {
     val context = LocalContext.current
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
-    var showFolderPicker by remember { mutableStateOf(false) }
+    var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
 
     LaunchedEffect(Unit) {
         importFolders = withContext(Dispatchers.IO) { findImportFolders() }
@@ -178,20 +178,26 @@ private fun IdleContent() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { showFolderPicker = true }) {
+                Button(onClick = { pickerTarget = ShareTarget.LIGHTROOM }) {
                     Text("Import to Lightroom")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { pickerTarget = ShareTarget.IMMICH }) {
+                    Text("Send to Immich")
                 }
             }
         }
     }
 
-    if (showFolderPicker) {
+    pickerTarget?.let { target ->
         FolderPickerDialog(
             folders = importFolders,
-            onDismiss = { showFolderPicker = false },
+            title = target.pickerTitle,
+            confirmLabel = target.confirmLabel,
+            onDismiss = { pickerTarget = null },
             onConfirm = { selected ->
-                showFolderPicker = false
-                launchLightroomImport(context, selected)
+                pickerTarget = null
+                launchCr3Share(context, selected, target)
             },
         )
     }
@@ -511,7 +517,7 @@ private fun TransferringContent(state: TransferState.Transferring) {
 private fun DoneContent(state: TransferState.Done) {
     val context = LocalContext.current
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
-    var showFolderPicker by remember { mutableStateOf(false) }
+    var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
 
     LaunchedEffect(Unit) {
         importFolders = withContext(Dispatchers.IO) { findImportFolders() }
@@ -532,10 +538,17 @@ private fun DoneContent(state: TransferState.Done) {
             }
             Spacer(modifier = Modifier.height(16.dp))
             Button(
-                onClick = { showFolderPicker = true },
+                onClick = { pickerTarget = ShareTarget.LIGHTROOM },
                 enabled = importFolders.isNotEmpty(),
             ) {
                 Text("Import to Lightroom")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { pickerTarget = ShareTarget.IMMICH },
+                enabled = importFolders.isNotEmpty(),
+            ) {
+                Text("Send to Immich")
             }
             Spacer(modifier = Modifier.height(8.dp))
             Button(onClick = {
@@ -561,13 +574,15 @@ private fun DoneContent(state: TransferState.Done) {
         }
     }
 
-    if (showFolderPicker) {
+    pickerTarget?.let { target ->
         FolderPickerDialog(
             folders = importFolders,
-            onDismiss = { showFolderPicker = false },
+            title = target.pickerTitle,
+            confirmLabel = target.confirmLabel,
+            onDismiss = { pickerTarget = null },
             onConfirm = { selected ->
-                showFolderPicker = false
-                launchLightroomImport(context, selected)
+                pickerTarget = null
+                launchCr3Share(context, selected, target)
             },
         )
     }
@@ -617,7 +632,34 @@ private fun findImportFolders(): List<java.io.File> {
         .toList()
 }
 
-private fun launchLightroomImport(context: Context, folders: List<java.io.File>) {
+/** Apps a set of imported CR3 folders can be handed off to via the Android share sheet. */
+private enum class ShareTarget(
+    val packageName: String,
+    val pickerTitle: String,
+    val confirmLabel: String,
+    val missingAppMessage: String,
+) {
+    LIGHTROOM(
+        packageName = "com.adobe.lrmobile",
+        pickerTitle = "Select folders to import",
+        confirmLabel = "Import",
+        missingAppMessage = "No app available to import files",
+    ),
+
+    /**
+     * Immich registers ACTION_SEND and ACTION_SEND_MULTIPLE for image MIME types, so shared
+     * CR3s land in its upload queue. Immich reaches the home server over Tailscale itself —
+     * this app still makes no network requests of its own.
+     */
+    IMMICH(
+        packageName = "app.alextran.immich",
+        pickerTitle = "Select folders to upload",
+        confirmLabel = "Upload",
+        missingAppMessage = "Immich is not installed",
+    ),
+}
+
+private fun launchCr3Share(context: Context, folders: List<java.io.File>, target: ShareTarget) {
     val cr3Files = folders.flatMap { folder ->
         folder.walkTopDown()
             .filter { it.isFile && it.name.endsWith(".CR3", ignoreCase = true) }
@@ -632,7 +674,7 @@ private fun launchLightroomImport(context: Context, folders: List<java.io.File>)
     val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
         type = "image/*"
         putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-        setPackage("com.adobe.lrmobile")
+        setPackage(target.packageName)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     try {
@@ -644,9 +686,9 @@ private fun launchLightroomImport(context: Context, folders: List<java.io.File>)
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(chooser, "Import ${cr3Files.size} CR3 files"))
+            context.startActivity(Intent.createChooser(chooser, "Send ${cr3Files.size} CR3 files"))
         } catch (_: Exception) {
-            Toast.makeText(context, "No app available to import files", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, target.missingAppMessage, Toast.LENGTH_SHORT).show()
         }
     }
 }
@@ -654,6 +696,8 @@ private fun launchLightroomImport(context: Context, folders: List<java.io.File>)
 @Composable
 private fun FolderPickerDialog(
     folders: List<java.io.File>,
+    title: String,
+    confirmLabel: String,
     onDismiss: () -> Unit,
     onConfirm: (List<java.io.File>) -> Unit,
 ) {
@@ -664,7 +708,7 @@ private fun FolderPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select folders to import") },
+        title = { Text(title) },
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                 items(folders) { folder ->
@@ -702,7 +746,7 @@ private fun FolderPickerDialog(
                     onConfirm(folders.filter { it.absolutePath in selected })
                 },
                 enabled = selected.isNotEmpty(),
-            ) { Text("Import") }
+            ) { Text(confirmLabel) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

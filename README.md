@@ -10,6 +10,7 @@ Built specifically for the **Canon EOS R8**, but should work with other Canon ca
 - **No file limit** — transfers all CR3 and MP4 files, bypassing Android's 99-file SAF picker
 - **Smart dedup** — skips files already transferred (reinstall-safe, checked against files on disk)
 - **Folder-scoped Lightroom import** — choose which date session(s) to import; available even without camera connected
+- **Send to Immich** — hand the same folder selection to the Immich app for upload to your own server; the app itself still makes no network requests
 - **Background transfer** — foreground service keeps transfer alive while you use other apps
 - **Transfer history** — log of past sessions with file counts, size and duration
 - **Public storage** — CR3 to `DCIM/CanonImports/YYYY-MM-DD/`, MP4 to `Movies/CanonImports/YYYY-MM-DD/`
@@ -36,7 +37,7 @@ Before connecting, set your Canon camera to the correct USB mode:
 1. Connect your Canon camera to your phone with a USB-C cable
 2. The app auto-launches and scans for CR3 files
 3. Tap **Start Transfer**
-4. When done, tap **Import to Lightroom** or **Open Folder**
+4. When done, tap **Import to Lightroom**, **Send to Immich**, or **Open Folder**
 
 Files are saved to: `Internal Storage / DCIM / CanonImports / YYYY-MM-DD /`
 

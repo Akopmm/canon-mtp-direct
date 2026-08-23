@@ -1,6 +1,6 @@
 # Privacy Policy for CR3 Transfer
 
-**Last Updated:** May 13, 2026
+**Last Updated:** August 23, 2026
 
 ## Overview
 
@@ -107,6 +107,7 @@ When you connect your Canon EOS R8:
 
 The App include integration with:
 - **Lightroom Mobile:** When you choose to import to Lightroom, the App opens Lightroom with the file URIs. No data is sent to Adobe except what Lightroom normally collects.
+- **Immich:** When you choose to send files to Immich, the App opens the Immich app with the file URIs. Any upload is performed by Immich to the server you configured in it — the App itself never transmits your files.
 
 The App does not integrate with any other third-party services.
 
