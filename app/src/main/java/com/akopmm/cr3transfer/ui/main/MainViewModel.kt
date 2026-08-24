@@ -301,17 +301,22 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun selectAll() {
+    /**
+     * Select [handles]. The picker passes only the currently visible (sorted/filtered) files,
+     * so "All" never reaches in and selects something the user cannot see.
+     */
+    fun selectHandles(handles: Collection<Int>) {
         val current = _state.value
         if (current is TransferState.FilePicker) {
-            _state.value = current.copy(selectedHandles = current.files.map { it.objectHandle }.toSet())
+            _state.value = current.copy(selectedHandles = current.selectedHandles + handles)
         }
     }
 
-    fun selectNone() {
+    /** Deselect [handles] — the visible set, for the same reason as [selectHandles]. */
+    fun deselectHandles(handles: Collection<Int>) {
         val current = _state.value
         if (current is TransferState.FilePicker) {
-            _state.value = current.copy(selectedHandles = emptySet())
+            _state.value = current.copy(selectedHandles = current.selectedHandles - handles.toSet())
         }
     }
 

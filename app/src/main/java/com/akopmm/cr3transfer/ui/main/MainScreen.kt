@@ -34,6 +34,9 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -122,8 +125,8 @@ fun MainScreen(
                     thumbnails = thumbnails,
                     hdrHandles = hdrHandles,
                     onToggleFile = { viewModel.toggleFileSelection(it) },
-                    onSelectAll = { viewModel.selectAll() },
-                    onSelectNone = { viewModel.selectNone() },
+                    onSelectAll = { viewModel.selectHandles(it) },
+                    onSelectNone = { viewModel.deselectHandles(it) },
                     onToggleDeleteMode = { viewModel.toggleDeleteAfterTransfer() },
                     onStartTransfer = {
                         if (viewModel.checkStorageAndProceed()) onStartTransfer()
@@ -266,6 +269,29 @@ private fun ScanningContent(state: TransferState.Scanning) {
     }
 }
 
+/**
+ * Ordering options for the picker grid. Camera enumeration order is folder-walk order, which is
+ * neither of these; newest-first is the default because that is what you just shot.
+ */
+private enum class PickerSort(val label: String, val comparator: Comparator<CameraFile>) {
+    NEWEST_FIRST(
+        "Newest first",
+        compareByDescending<CameraFile> { it.dateCreated }.thenByDescending { it.name },
+    ),
+    OLDEST_FIRST(
+        "Oldest first",
+        compareBy<CameraFile> { it.dateCreated }.thenBy { it.name },
+    ),
+    NAME_ASC(
+        "Name A–Z",
+        compareBy(String.CASE_INSENSITIVE_ORDER) { it.name },
+    ),
+    NAME_DESC(
+        "Name Z–A",
+        compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.name },
+    ),
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FilePickerContent(
@@ -273,14 +299,28 @@ private fun FilePickerContent(
     thumbnails: Map<Int, ByteArray>,
     hdrHandles: Set<Int>,
     onToggleFile: (Int) -> Unit,
-    onSelectAll: () -> Unit,
-    onSelectNone: () -> Unit,
+    onSelectAll: (List<Int>) -> Unit,
+    onSelectNone: (List<Int>) -> Unit,
     onToggleDeleteMode: () -> Unit,
     onStartTransfer: () -> Unit,
 ) {
-    val selectedCount = state.selectedHandles.size
-    val totalCount = state.files.size
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var sort by remember { mutableStateOf(PickerSort.NEWEST_FIRST) }
+    var hiddenTypes by remember { mutableStateOf(emptySet<FileType>()) }
+
+    // Only offer filtering for the types this camera actually gave us.
+    val availableTypes = remember(state.files) {
+        state.files.map { it.fileType }.distinct().sortedBy { it.ordinal }
+    }
+    val visibleFiles = remember(state.files, sort, hiddenTypes) {
+        state.files.filterNot { it.fileType in hiddenTypes }.sortedWith(sort.comparator)
+    }
+    val visibleHandles = remember(visibleFiles) { visibleFiles.map { it.objectHandle } }
+
+    val selectedCount = state.selectedHandles.size
+    val visibleSelectedCount = visibleHandles.count { it in state.selectedHandles }
+    // Files that are selected but filtered out still transfer — say so rather than surprise anyone.
+    val hiddenSelectedCount = selectedCount - visibleSelectedCount
 
     if (showDeleteConfirm) {
         AlertDialog(
@@ -308,11 +348,58 @@ private fun FilePickerContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("$selectedCount / $totalCount selected", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "$visibleSelectedCount / ${visibleFiles.size} selected",
+                style = MaterialTheme.typography.titleSmall,
+            )
             Row {
-                TextButton(onClick = onSelectAll) { Text("All") }
-                TextButton(onClick = onSelectNone) { Text("None") }
+                TextButton(onClick = { onSelectAll(visibleHandles) }) { Text("All") }
+                TextButton(onClick = { onSelectNone(visibleHandles) }) { Text("None") }
             }
+        }
+
+        // Sort + type filter
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box {
+                var sortMenuOpen by remember { mutableStateOf(false) }
+                TextButton(onClick = { sortMenuOpen = true }) { Text("Sort: ${sort.label}") }
+                DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
+                    PickerSort.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.label) },
+                            onClick = {
+                                sort = option
+                                sortMenuOpen = false
+                            },
+                        )
+                    }
+                }
+            }
+            if (availableTypes.size > 1) {
+                Spacer(modifier = Modifier.width(8.dp))
+                availableTypes.forEach { type ->
+                    FilterChip(
+                        selected = type !in hiddenTypes,
+                        onClick = {
+                            hiddenTypes = if (type in hiddenTypes) hiddenTypes - type else hiddenTypes + type
+                        },
+                        label = { Text(type.name) },
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                }
+            }
+        }
+
+        if (hiddenSelectedCount > 0) {
+            Text(
+                text = "$hiddenSelectedCount selected ${if (hiddenSelectedCount == 1) "file is" else "files are"} hidden by the filter and will still transfer",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp),
+            )
         }
 
         // SD card free space
@@ -346,7 +433,7 @@ private fun FilePickerContent(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            items(state.files, key = { it.objectHandle }) { file ->
+            items(visibleFiles, key = { it.objectHandle }) { file ->
                 FileThumbnail(
                     file = file,
                     thumbnailData = thumbnails[file.objectHandle],
