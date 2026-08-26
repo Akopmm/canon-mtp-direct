@@ -70,7 +70,7 @@ On an **older DSLR** (EOS 760D/750D, 80D, 6D…) there is no such menu, but Wi-F
 2. **Disable auto power-off**
 3. Their port is Mini-USB, not USB-C, so you need a USB-C **OTG adapter** plus the camera's own cable
 
-> Built and tested against the **Canon EOS R8**; CR2/MOV support is written to the format specs rather than verified on a body. Reports from other Canon cameras are welcome either way.
+> Built and tested against the **Canon EOS R8** upstream. CR2/MOV is confirmed on a **Canon EOS 760D**: files enumerate, thumbnails render from the embedded previews, and transferred CR2s open in Lightroom. Reports from other Canon cameras are welcome either way.
 
 ## Usage
 
@@ -131,7 +131,7 @@ The `release.jks` keystore is excluded from version control — contact the main
 
 ## Contributing
 
-Issues and pull requests are welcome — particularly reports from **Canon bodies other than the R8**, which is the one camera this has been tested against, and from **CR2-era DSLRs**, whose support has not yet been confirmed on hardware.
+Issues and pull requests are welcome — particularly reports from **Canon bodies other than the R8 and the 760D**, the two cameras this has been tested against.
 
 ## License
 
