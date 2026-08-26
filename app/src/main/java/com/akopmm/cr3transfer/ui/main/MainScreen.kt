@@ -508,7 +508,7 @@ private fun FileThumbnail(
         }
 
         // Video play icon overlay
-        if (file.fileType == FileType.MP4) {
+        if (file.fileType.isVideo) {
             Icon(
                 imageVector = Icons.Filled.PlayArrow,
                 contentDescription = "Video",
@@ -554,7 +554,7 @@ private fun PlaceholderThumbnail(fileType: FileType, isHdr: Boolean = false) {
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
-        if (isHdr && fileType == FileType.CR3) {
+        if (isHdr && fileType.isRaw) {
             // HDR-PQ RAW: no preview is decodable on Android (10-bit HEVC 4:2:2). Show a distinct
             // "HDR" tile so these shots are still identifiable in the grid.
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -564,19 +564,14 @@ private fun PlaceholderThumbnail(fileType: FileType, isHdr: Boolean = false) {
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    text = "CR3",
+                    text = fileType.name,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         } else {
             Text(
-                text = when (fileType) {
-                    FileType.CR3 -> "CR3"
-                    FileType.JPG -> "JPG"
-                    FileType.HEIF -> "HEIF"
-                    FileType.MP4 -> "MP4"
-                },
+                text = fileType.name,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -700,7 +695,13 @@ private fun formatBytes(bytes: Long): String {
     else String.format("%.0f MB free on camera SD", bytes / (1024.0 * 1024.0))
 }
 
-/** Returns date-named subdirectories of CanonImports that contain at least one CR3 file, newest first. */
+/** RAW stills as written to disk: CR3 from Digic 8 and newer bodies, CR2 from the ones before. */
+private val RAW_EXTENSIONS = listOf(".CR3", ".CR2")
+
+private fun java.io.File.isRawImport(): Boolean =
+    isFile && RAW_EXTENSIONS.any { name.endsWith(it, ignoreCase = true) }
+
+/** Returns date-named subdirectories of CanonImports that contain at least one RAW file, newest first. */
 private fun findImportFolders(): List<java.io.File> {
     val importDir = java.io.File(
         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
@@ -711,15 +712,13 @@ private fun findImportFolders(): List<java.io.File> {
     return importDir.walkTopDown()
         .filter { dir ->
             dir.isDirectory && dir != importDir &&
-                dir.listFiles()?.any { child ->
-                    child.isFile && child.name.endsWith(".CR3", ignoreCase = true)
-                } == true
+                dir.listFiles()?.any { child -> child.isRawImport() } == true
         }
         .sortedWith(compareByDescending<java.io.File> { it.name }.thenByDescending { it.parentFile?.name })
         .toList()
 }
 
-/** Apps a set of imported CR3 folders can be handed off to via the Android share sheet. */
+/** Apps a set of imported RAW folders can be handed off to via the Android share sheet. */
 private enum class ShareTarget(
     val packageName: String,
     val pickerTitle: String,
@@ -735,7 +734,7 @@ private enum class ShareTarget(
 
     /**
      * Immich registers ACTION_SEND and ACTION_SEND_MULTIPLE for image MIME types, so shared
-     * CR3s land in its upload queue. Immich reaches the home server over Tailscale itself —
+     * RAW files land in its upload queue. Immich reaches the home server over Tailscale itself —
      * this app still makes no network requests of its own.
      */
     IMMICH(
@@ -747,17 +746,15 @@ private enum class ShareTarget(
 }
 
 private fun launchCr3Share(context: Context, folders: List<java.io.File>, target: ShareTarget) {
-    val cr3Files = folders.flatMap { folder ->
-        folder.walkTopDown()
-            .filter { it.isFile && it.name.endsWith(".CR3", ignoreCase = true) }
-            .toList()
+    val rawFiles = folders.flatMap { folder ->
+        folder.walkTopDown().filter { it.isRawImport() }.toList()
     }
-    if (cr3Files.isEmpty()) {
-        Toast.makeText(context, "No CR3 files found in selected folders", Toast.LENGTH_SHORT).show()
+    if (rawFiles.isEmpty()) {
+        Toast.makeText(context, "No RAW files found in selected folders", Toast.LENGTH_SHORT).show()
         return
     }
     val authority = "${context.packageName}.fileprovider"
-    val uris = ArrayList(cr3Files.map { FileProvider.getUriForFile(context, authority, it) })
+    val uris = ArrayList(rawFiles.map { FileProvider.getUriForFile(context, authority, it) })
     val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
         type = "image/*"
         putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
@@ -773,7 +770,7 @@ private fun launchCr3Share(context: Context, folders: List<java.io.File>, target
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(chooser, "Send ${cr3Files.size} CR3 files"))
+            context.startActivity(Intent.createChooser(chooser, "Send ${rawFiles.size} RAW files"))
         } catch (_: Exception) {
             Toast.makeText(context, target.missingAppMessage, Toast.LENGTH_SHORT).show()
         }

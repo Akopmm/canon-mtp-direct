@@ -186,10 +186,10 @@ class MainViewModel @Inject constructor(
                 try {
                     // Primary: the camera's embedded MTP thumbnail.
                     if (loadMtpThumbnail(file)) continue
-                    // Fallback (CR3 only): pull the preview JPEG straight out of the file header.
+                    // Fallback (RAW only): pull the preview JPEG straight out of the file.
                     // Covers cameras that expose no usable MTP thumbnail for RAW files.
-                    if (file.fileType == FileType.CR3) {
-                        loadEmbeddedCr3Preview(file)
+                    if (file.fileType.isRaw) {
+                        loadEmbeddedRawPreview(file)
                     }
                 } catch (e: Exception) {
                     // Skip thumbnail for this file if loading fails
@@ -242,6 +242,52 @@ class MainViewModel @Inject constructor(
         _thumbnails.value = _thumbnails.value + (file.objectHandle to jpeg)
         android.util.Log.d("CR3Transfer", "Loaded MTP thumbnail for ${file.name} (raw=${thumb.size}B jpeg=${jpeg.size}B)")
         return true
+    }
+
+    /** Fallback: pull a preview JPEG out of the RAW file itself, by container. */
+    private suspend fun loadEmbeddedRawPreview(file: CameraFile) {
+        if (file.fileType == FileType.CR2) loadEmbeddedCr2Preview(file) else loadEmbeddedCr3Preview(file)
+    }
+
+    /**
+     * Fallback for CR2 (pre-Digic 8 bodies such as the 760D). A CR2 is a TIFF whose preview bytes
+     * sit well past any header window, so scanning the head the way the CR3 path does finds
+     * nothing: parse the TIFF directory out of a small head read, then fetch just the preview's
+     * byte range.
+     */
+    private suspend fun loadEmbeddedCr2Preview(file: CameraFile) {
+        val head = withContext(Dispatchers.IO) {
+            withTimeoutOrNull(8_000L) {
+                deviceManager.readObjectHead(file.objectHandle, CR2_HEAD_READ_BYTES)
+            }
+        }
+        if (head == null || head.isEmpty()) {
+            android.util.Log.w("CR3Transfer", "No header bytes for CR2 fallback: ${file.name}")
+            return
+        }
+        val range = ThumbnailUtils.findCr2PreviewRange(head)
+        if (range == null) {
+            android.util.Log.w(
+                "CR3Transfer",
+                "No preview in CR2 directory for ${file.name} (head=${head.size}B [${ThumbnailUtils.hexPreview(head)}])"
+            )
+            return
+        }
+        val preview = withContext(Dispatchers.IO) {
+            withTimeoutOrNull(8_000L) {
+                deviceManager.readObjectRange(file.objectHandle, range.offset, range.length)
+            }
+        }
+        val jpeg = ThumbnailUtils.extractJpeg(preview)?.takeIf { decodesToBitmap(it) }
+        if (jpeg == null) {
+            android.util.Log.w(
+                "CR3Transfer",
+                "CR2 preview at ${range.offset}+${range.length} for ${file.name} did not decode"
+            )
+            return
+        }
+        _thumbnails.value = _thumbnails.value + (file.objectHandle to jpeg)
+        android.util.Log.d("CR3Transfer", "Loaded embedded CR2 preview for ${file.name} (${jpeg.size}B)")
     }
 
     /** Fallback: read the CR3 header via partial MTP read and extract the embedded preview JPEG. */
@@ -381,5 +427,9 @@ class MainViewModel @Inject constructor(
     private companion object {
         // The embedded THMB/Exif preview lives in the CR3 header, well before the RAW payload.
         private const val CR3_HEAD_READ_BYTES = 512 * 1024
+
+        // A CR2 only needs its TIFF directories, which are grouped at the very start of the file
+        // — the preview itself is fetched afterwards by the offset they give.
+        private const val CR2_HEAD_READ_BYTES = 64 * 1024
     }
 }

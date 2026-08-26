@@ -154,6 +154,17 @@ class MtpFileEnumerator @Inject constructor() {
     }
 
     /**
+     * Capture time in ms. Older EOS bodies (the 760D among them) leave ObjectInfo's capture date
+     * empty, which would date every file to 1970 and make "newest first" meaningless; fall back
+     * to the modification date, which those bodies do fill in.
+     */
+    private fun readDate(info: MtpObjectInfo): Long {
+        val created = try { info.dateCreated } catch (e: Throwable) { 0L }
+        if (created > 0L) return created
+        return try { info.dateModified } catch (e: Throwable) { 0L }
+    }
+
+    /**
      * getObjectInfo with one retry. When a huge (>4GB) video is on the card the R8's MTP
      * responder intermittently corrupts handles, so a first call can throw or return null while
      * a retry succeeds. Logs the exception TYPE (not just message, which is often null) so we
@@ -173,7 +184,7 @@ class MtpFileEnumerator @Inject constructor() {
     }
 
     /**
-     * Builds a [CameraFile] for CR3/MP4 objects, reading each field defensively. A corrupted
+     * Builds a [CameraFile] for supported objects, reading each field defensively. A corrupted
      * ObjectInfo for a huge file can throw when its size/date fields are accessed; we log the
      * exception type and skip rather than letting it bubble up and silently drop the file.
      * Size is read as unsigned uint32 so 2–4GB videos don't show a negative size.
@@ -183,6 +194,8 @@ class MtpFileEnumerator @Inject constructor() {
             val name = info.name ?: return null
             val type = when {
                 name.endsWith(".CR3", ignoreCase = true) -> FileType.CR3
+                // Pre-Digic 8 bodies (EOS 760D/Rebel T6s, 80D, 5D III…) write CR2 instead.
+                name.endsWith(".CR2", ignoreCase = true) -> FileType.CR2
                 name.endsWith(".JPG", ignoreCase = true) ||
                     name.endsWith(".JPEG", ignoreCase = true) -> FileType.JPG
                 // Canon writes HEIF (HDR PQ) shots with a .HIF extension; accept .HEIF/.HEIC too.
@@ -190,13 +203,15 @@ class MtpFileEnumerator @Inject constructor() {
                     name.endsWith(".HEIF", ignoreCase = true) ||
                     name.endsWith(".HEIC", ignoreCase = true) -> FileType.HEIF
                 name.endsWith(".MP4", ignoreCase = true) -> FileType.MP4
+                // Those same older bodies record QuickTime .MOV rather than .MP4.
+                name.endsWith(".MOV", ignoreCase = true) -> FileType.MOV
                 else -> return null
             }
             CameraFile(
                 objectHandle = handle,
                 name = name,
                 sizeBytes = readSize(info),
-                dateCreated = info.dateCreated,
+                dateCreated = readDate(info),
                 fileType = type,
             )
         } catch (e: Throwable) {

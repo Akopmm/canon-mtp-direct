@@ -50,7 +50,7 @@ class MtpDeviceManager @Inject constructor(
 
     /**
      * What the camera advertises for this object's embedded thumbnail. Diagnostic only —
-     * lets us see whether the R8 reports a thumbnail at all and in which format for CR3.
+     * lets us see whether the camera reports a thumbnail at all, and in which format, for RAW.
      */
     fun getThumbnailDiag(objectHandle: Int): String {
         val info = mtpDevice?.getObjectInfo(objectHandle) ?: return "objectInfo=null"
@@ -66,14 +66,23 @@ class MtpDeviceManager @Inject constructor(
      * Returns null if the camera doesn't support partial reads (GetPartialObject) or on error.
      * MUST be called on Dispatchers.IO.
      */
-    fun readObjectHead(objectHandle: Int, maxBytes: Int): ByteArray? {
+    fun readObjectHead(objectHandle: Int, maxBytes: Int): ByteArray? =
+        readObjectRange(objectHandle, 0L, maxBytes)
+
+    /**
+     * Reads [length] bytes starting at [offset]. A CR2 keeps its preview JPEG far past the file
+     * header, so for those we parse the exact range out of the TIFF directory and fetch only
+     * that instead of pulling megabytes per thumbnail. MUST be called on Dispatchers.IO.
+     */
+    fun readObjectRange(objectHandle: Int, offset: Long, length: Int): ByteArray? {
         val device = mtpDevice ?: return null
+        if (length <= 0) return null
         return try {
-            val buffer = ByteArray(maxBytes)
-            val read = device.getPartialObject(objectHandle, 0L, maxBytes.toLong(), buffer)
+            val buffer = ByteArray(length)
+            val read = device.getPartialObject(objectHandle, offset, length.toLong(), buffer)
             when {
                 read <= 0L -> null
-                read.toInt() == maxBytes -> buffer
+                read.toInt() == length -> buffer
                 else -> buffer.copyOf(read.toInt())
             }
         } catch (e: Exception) {
