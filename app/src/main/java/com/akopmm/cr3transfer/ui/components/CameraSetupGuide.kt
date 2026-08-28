@@ -36,6 +36,14 @@ fun CameraSetupGuide(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Spacer(modifier = Modifier.height(8.dp))
+            // Pre-R bodies fail here for the opposite reason: no USB-app menu to set, but an
+            // enabled Wi-Fi function that switches their USB port off entirely.
+            Text(
+                text = stringResource(R.string.camera_setup_instruction_legacy),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = stringResource(R.string.auto_power_off_warning),
                 style = MaterialTheme.typography.bodySmall,

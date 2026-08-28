@@ -31,8 +31,9 @@ This app talks to the camera **directly over MTP**, so it never touches that pic
 |---|---|
 | 📷 **Direct USB-C transfer** | Plug the camera into the phone. No cables to a computer, no Wi-Fi, no cloud. |
 | ♾️ **No file limit** | Reads the card over MTP, so Android's 99-file picker cap doesn't apply. |
-| 🗂️ **Sort & filter the picker** | Order by capture date or name; filter to just the CR3s, or just the JPEGs. |
-| 🖼️ **Real thumbnails** | Embedded previews pulled straight from the RAW files. |
+| 🗂️ **Sort & filter the picker** | Order by capture date or name; filter to just the RAWs, or just the JPEGs. |
+| 🖼️ **Real thumbnails** | Embedded previews pulled straight from the RAW files — CR3 and CR2 alike. |
+| 🧩 **Old bodies too** | CR3/MP4 from Digic 8 and newer; CR2/MOV from the DSLRs before them. |
 | 🧠 **Smart dedup** | Skips what you already transferred — per camera, checked against files on disk, survives a reinstall. |
 | 📤 **Send to Immich** | Hands transferred RAWs to the Immich app, which uploads them to your own server. |
 | 🎨 **Lightroom import** | Send one date folder or several, with or without the camera connected. |
@@ -57,17 +58,23 @@ This app talks to the camera **directly over MTP**, so it never touches that pic
 
 ## Camera setup
 
-On the camera, before connecting:
+On an **EOS R** body, before connecting:
 
 1. **Menu → Communication settings → Choose USB connection app**
 2. Select **Photo Import/Remote Control** — *not* "EOS Utility" or "Register to a smartphone"
 3. **Disable auto power-off**, or the camera will drop the connection mid-transfer
 
-> Built and tested against the **Canon EOS R8**. Other Canon bodies that expose MTP should work — reports welcome either way.
+On an **older DSLR** (EOS 760D/750D, 80D, 6D…) there is no such menu, but Wi-Fi and the USB port are mutually exclusive on those bodies:
+
+1. **Menu → Set-up 3 → Wi-Fi/NFC → Disable** — with Wi-Fi enabled the USB port stays dead and the phone sees nothing
+2. **Disable auto power-off**
+3. Their port is Mini-USB, not USB-C, so you need a USB-C **OTG adapter** plus the camera's own cable
+
+> Built and tested against the **Canon EOS R8** upstream. CR2/MOV is confirmed on a **Canon EOS 760D**: files enumerate, thumbnails render from the embedded previews, and transferred CR2s open in Lightroom. Reports from other Canon cameras are welcome either way.
 
 ## Usage
 
-1. Connect the camera to the phone with a USB-C cable — the app launches itself
+1. Connect the camera to the phone (USB-C, or an OTG adapter on older bodies) — the app launches itself
 2. Pick what to transfer (sort, filter, or just take the pre-selected new files)
 3. Tap **Start Transfer**
 4. When it finishes, tap **Import to Lightroom**, **Send to Immich**, or **Open Folder**
@@ -75,13 +82,15 @@ On the camera, before connecting:
 Files land in:
 
 ```
-DCIM/CanonImports/<camera>/YYYY-MM-DD/     photos (CR3, JPG, HEIF)
-Movies/CanonImports/<camera>/YYYY-MM-DD/   videos (MP4)
+DCIM/CanonImports/<camera>/YYYY-MM-DD/     photos (CR3, CR2, JPG, HEIF)
+Movies/CanonImports/<camera>/YYYY-MM-DD/   videos (MP4, MOV)
 ```
 
 ## How it works
 
-The app drives `android.mtp` against the camera directly rather than going through the Storage Access Framework. It walks the DCIM tree on the card recursively, identifies files by extension (the R8 does not reliably report CR3 format codes over MTP), and copies each one with `MtpDevice.importFile()` so a 30 MB RAW never has to fit in memory.
+The app drives `android.mtp` against the camera directly rather than going through the Storage Access Framework. It walks the DCIM tree on the card recursively, identifies files by extension (Canon bodies do not reliably report RAW format codes over MTP), and copies each one with `MtpDevice.importFile()` so a 30 MB RAW never has to fit in memory.
+
+Thumbnails come from the camera's own MTP thumbnail when it returns a usable one, and from the file otherwise — which differs by container. A CR3 is ISOBMFF with its preview inline near the start, so the app scans the head of the file. A CR2 is a TIFF whose preview bytes sit far past any header window, so the app parses the image directories instead and fetches just the byte range they point at.
 
 Handing files to Immich or Lightroom is a plain Android share intent — **the app itself holds no `INTERNET` permission and makes no network requests.** Immich does its own uploading, to whichever server you configured in it.
 
@@ -91,7 +100,7 @@ Kotlin throughout, Jetpack Compose UI, MVVM with Hilt, coroutines and Flow. No R
 
 - Android 8.0+ (API 26)
 - A phone with USB-C **OTG / host mode** support
-- A Canon camera that exposes MTP
+- A Canon camera that exposes MTP (an OTG adapter too, for Mini-USB bodies)
 
 ## Building from source
 
@@ -122,7 +131,7 @@ The `release.jks` keystore is excluded from version control — contact the main
 
 ## Contributing
 
-Issues and pull requests are welcome — particularly reports from **Canon bodies other than the R8**, which is the one camera this has been tested against.
+Issues and pull requests are welcome — particularly reports from **Canon bodies other than the R8 and the 760D**, the two cameras this has been tested against.
 
 ## License
 

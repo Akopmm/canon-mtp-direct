@@ -113,9 +113,11 @@ class MtpTransferRepository @Inject constructor(
                     if (imported && destFile.exists() && destFile.length() > 0) {
                         val mimeType = when (file.fileType) {
                             FileType.CR3 -> "image/x-canon-cr3"
+                            FileType.CR2 -> "image/x-canon-cr2"
                             FileType.JPG -> "image/jpeg"
                             FileType.HEIF -> "image/heif"
                             FileType.MP4 -> "video/mp4"
+                            FileType.MOV -> "video/quicktime"
                         }
                         MediaScannerConnection.scanFile(
                             context,
