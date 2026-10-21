@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Android app that transfers RAW files from a Canon camera via USB using the `android.mtp` API directly, bypassing Android's 99-file SAF picker limit. Fully offline — no networking.
 
-Two generations of Canon body are in scope: Digic 8 and newer (EOS R8, R, M50, 90D…) write `.CR3` and `.MP4`, everything before that (EOS 760D/Rebel T6s, 80D, 5D III…) writes `.CR2` and `.MOV`. The R8 is the only body tested on hardware.
+Two generations of Canon body are in scope: Digic 8 and newer (EOS R8, R, M50, 90D…) write `.CR3` and `.MP4`, everything before that (EOS 760D/Rebel T6s, 80D, 5D III…) writes `.CR2` and `.MOV`. Tested on hardware: EOS R8 (maintainer), EOS R7 (contributor, #11) and EOS 760D (contributor, #8).
 
 ## Build & Development
 
@@ -40,7 +40,7 @@ No emulator support for USB Host mode — MTP testing requires a physical device
 ```
 data/mtp/          → MTP device management, file enumeration, transfer (emits progress Flow)
 data/prefs/        → DataStore for transferred filename dedup
-domain/model/      → Cr3File (objectHandle, name, sizeBytes, dateCreated), TransferState (sealed class)
+domain/model/      → CameraFile (objectHandle, name, sizeBytes, dateCreated, fileType), TransferState (sealed class)
 domain/usecase/    → ScanCameraUseCase, TransferFilesUseCase
 service/           → TransferForegroundService (keeps transfer alive, posts progress notification)
 receiver/          → UsbReceiver (ACTION_USB_DEVICE_ATTACHED)
@@ -68,7 +68,7 @@ Canon bodies organize files in DCIM subfolders. Walk `getObjectHandles` recursiv
 Key is filename (e.g. `IMG_1234.CR3`), not full path — Canon reuses folder names across sessions. Store in DataStore as `Set<String>`.
 
 ### Destination path
-Save to `/sdcard/Pictures/CanonImports/YYYY-MM-DD/IMG_XXXX.CR3`. Create date subfolder with `File.mkdirs()`. After saving, call `MediaScannerConnection.scanFile()` with the MIME for the type (`image/x-canon-cr3`, `image/x-canon-cr2`, `video/quicktime`, …).
+Photos go to `DCIM/CanonImports/<camera>/YYYY-MM-DD/`, videos to `Movies/CanonImports/<camera>/YYYY-MM-DD/` (`<camera>` = nickname or sanitised USB serial, see `MtpDeviceManager.sanitizeFolderName`). Create date subfolder with `File.mkdirs()`. After saving, call `MediaScannerConnection.scanFile()` with the MIME for the type (`image/x-canon-cr3`, `image/x-canon-cr2`, `video/quicktime`, …).
 
 ### RAW thumbnails differ by container
 When the camera's MTP thumbnail is missing or won't decode, the preview has to come out of the file. CR3 is ISOBMFF with the preview inline near the start — scan the head. CR2 is a TIFF whose preview bytes live far past any header window — parse the IFD chain (`ThumbnailUtils.findCr2PreviewRange`) and fetch only the byte range it reports. Never pull a multi-MB full-size preview per tile when the small one is described.
@@ -106,6 +106,9 @@ Never crash on MTP null returns. Degrade gracefully:
 - USB detached mid-transfer → stop service, show interruption message
 - Low storage → check `StatFs` before starting, show required vs available space
 
+### Star ratings come from the file header
+In-camera ratings (`ThumbnailUtils.extractRating`) are read from the RAW header: the XMP `xmp:Rating` packet, or Exif tag `0x4746`. A CR3 keeps that XMP after the `moov` box, so its offset follows the embedded thumbnail size — measured 18–30 KB on an RP, 27–39 KB on an R50, 51–67 KB on an R8 — hence a 128 KB read. Read ratings one file at a time after the thumbnails, never in parallel and never during a transfer.
+
 ## Out of Scope (v1)
 
-No Wi-Fi transfer, SD card destination, RAW preview, delete-after-transfer, multi-camera support, cloud backup, or Settings screen.
+No Wi-Fi transfer, SD card destination, RAW preview, cloud backup, or Settings screen. (Delete-after-transfer and per-camera folders have since been added.) Don't add a second "copy to another folder" step after the import — choosing where imports land is the planned direction.
