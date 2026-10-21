@@ -106,11 +106,7 @@ class MtpDeviceManager @Inject constructor(
     }
 
     fun setCameraName(name: String?) {
-        cameraNameInternal = name
-            ?.trim()
-            ?.replace("[\\/:*?\"<>|]".toRegex(), "_")
-            ?.replace("\\s+".toRegex(), "_")
-            ?.takeIf { it.isNotBlank() }
+        cameraNameInternal = sanitizeFolderName(name)
     }
 
     private fun buildCameraId(device: UsbDevice): String {
@@ -119,12 +115,17 @@ class MtpDeviceManager @Inject constructor(
             ?: device.deviceName
             ?: "canon_${device.vendorId}_${device.productId}"
 
-        return rawId
+        return sanitizeFolderName(rawId)
+            ?: "camera_${device.vendorId}_${device.productId}"
+    }
+
+    private fun sanitizeFolderName(input: String?): String? {
+        if (input.isNullOrBlank()) return null
+        return input
+            .filter { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in " -_()." }
             .trim()
-            .replace("[\\/:*?\"<>|]".toRegex(), "_")
             .replace("\\s+".toRegex(), "_")
             .takeIf { it.isNotBlank() }
-            ?: "camera_${device.vendorId}_${device.productId}"
     }
 
     companion object {

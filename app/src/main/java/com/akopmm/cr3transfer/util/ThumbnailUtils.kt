@@ -232,6 +232,66 @@ object ThumbnailUtils {
 
     private fun Byte.u(): Int = this.toInt() and 0xFF
 
+    private val XMP_RATING_REGEX = Regex("""xmp:Rating=["']?([1-5])["']?|<xmp:Rating>([1-5])</xmp:Rating>""", RegexOption.IGNORE_CASE)
+
+    /**
+     * Attempts to parse a Canon star rating (1 to 5 stars) from CR3 / CR2 header bytes.
+     * Checks embedded XMP metadata and Exif Rating tag 0x4746. Returns null if unrated or missing.
+     */
+    fun extractRating(data: ByteArray?): Int? {
+        if (data == null || data.size < 8) return null
+
+        // 1. Check embedded XMP XML
+        val xmpRating = findXmpRating(data)
+        if (xmpRating != null && xmpRating in 1..5) {
+            return xmpRating
+        }
+
+        // 2. Check Exif Rating tag 0x4746 (18246)
+        val exifRating = findExifRating(data)
+        if (exifRating != null && exifRating in 1..5) {
+            return exifRating
+        }
+
+        return null
+    }
+
+    private fun findXmpRating(data: ByteArray): Int? {
+        val text = String(data, Charsets.ISO_8859_1)
+        val match = XMP_RATING_REGEX.find(text) ?: return null
+        val matchGroup = match.groupValues.getOrNull(1)?.ifBlank { null }
+            ?: match.groupValues.getOrNull(2)?.ifBlank { null }
+        return matchGroup?.toIntOrNull()
+    }
+
+    private fun findExifRating(data: ByteArray): Int? {
+        val limit = data.size - 10
+        var i = 0
+        while (i <= limit) {
+            // Tag 0x4746 (Rating), Little Endian: 46 47 03 00 01 00 00 00 [val] 00
+            if (data[i].u() == 0x46 && data[i + 1].u() == 0x47 &&
+                data[i + 2].u() == 0x03 && data[i + 3].u() == 0x00 &&
+                data[i + 4].u() == 0x01 && data[i + 5].u() == 0x00 &&
+                data[i + 6].u() == 0x00 && data[i + 7].u() == 0x00
+            ) {
+                val rating = data[i + 8].u() or (data[i + 9].u() shl 8)
+                if (rating in 1..5) return rating
+            }
+            // Tag 0x4746 (Rating), Big Endian: 47 46 00 03 00 00 00 01 00 [val]
+            if (data[i].u() == 0x47 && data[i + 1].u() == 0x46 &&
+                data[i + 2].u() == 0x00 && data[i + 3].u() == 0x00 &&
+                data[i + 4].u() == 0x00 && data[i + 5].u() == 0x00 &&
+                data[i + 6].u() == 0x00 && data[i + 7].u() == 0x01 &&
+                data[i + 8].u() == 0x00
+            ) {
+                val rating = data[i + 9].u()
+                if (rating in 1..5) return rating
+            }
+            i++
+        }
+        return null
+    }
+
     /** First [count] bytes rendered as space-separated hex — for diagnostic logging. */
     fun hexPreview(data: ByteArray?, count: Int = 16): String {
         if (data == null) return "<null>"

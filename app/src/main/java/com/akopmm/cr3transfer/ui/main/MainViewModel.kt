@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.akopmm.cr3transfer.data.mtp.MtpDeviceManager
 import com.akopmm.cr3transfer.data.mtp.MtpTransferRepository
 import com.akopmm.cr3transfer.data.prefs.CameraNameRepository
+import com.akopmm.cr3transfer.data.prefs.DefaultFolderInfo
+import com.akopmm.cr3transfer.data.prefs.DefaultFolderRepository
 import com.akopmm.cr3transfer.data.prefs.TransferSessionRepository
 import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileType
@@ -19,8 +21,10 @@ import com.akopmm.cr3transfer.util.ThumbnailUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -33,13 +37,50 @@ class MainViewModel @Inject constructor(
     private val transferRepository: MtpTransferRepository,
     private val cameraNameRepository: CameraNameRepository,
     private val sessionRepository: TransferSessionRepository,
+    private val defaultFolderRepository: DefaultFolderRepository,
 ) : ViewModel() {
+
+    val defaultFolder: StateFlow<DefaultFolderInfo?> = defaultFolderRepository.defaultFolder
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val autoClearImports: StateFlow<Boolean> = defaultFolderRepository.autoClearImports
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val rememberCameraNicknames: StateFlow<Boolean> = cameraNameRepository.rememberNicknames
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun saveDefaultFolder(uriString: String, displayName: String) {
+        viewModelScope.launch {
+            defaultFolderRepository.saveDefaultFolder(uriString, displayName)
+        }
+    }
+
+    fun clearDefaultFolder() {
+        viewModelScope.launch {
+            defaultFolderRepository.clearDefaultFolder()
+        }
+    }
+
+    fun setAutoClearImports(enabled: Boolean) {
+        viewModelScope.launch {
+            defaultFolderRepository.setAutoClearImports(enabled)
+        }
+    }
+
+    fun setRememberCameraNicknames(enabled: Boolean) {
+        viewModelScope.launch {
+            cameraNameRepository.setRememberNicknames(enabled)
+        }
+    }
 
     private val _state = MutableStateFlow<TransferState>(TransferState.Idle)
     val state: StateFlow<TransferState> = _state.asStateFlow()
 
     private val _thumbnails = MutableStateFlow<Map<Int, ByteArray>>(emptyMap())
     val thumbnails: StateFlow<Map<Int, ByteArray>> = _thumbnails.asStateFlow()
+
+    private val _ratings = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    val ratings: StateFlow<Map<Int, Int>> = _ratings.asStateFlow()
 
     // Handles of HDR-PQ CR3 shots whose HEVC preview can't be decoded on Android (shown with an
     // "HDR" placeholder). See loadEmbeddedCr3Preview.
@@ -179,11 +220,33 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun clearPreviousImports(onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            transferRepository.clearPreviousImports()
+            withContext(Dispatchers.Main) {
+                onComplete()
+            }
+        }
+    }
+
     private fun loadThumbnails(files: List<CameraFile>) {
         _hdrHandles.value = emptySet()
+        _ratings.value = emptyMap()
         viewModelScope.launch {
             for (file in files) {
                 try {
+                    if (file.fileType.isRaw) {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            try {
+                                val head = deviceManager.readObjectHead(file.objectHandle, CR2_HEAD_READ_BYTES)
+                                val rating = ThumbnailUtils.extractRating(head)
+                                if (rating != null && rating in 1..5) {
+                                    _ratings.value = _ratings.value + (file.objectHandle to rating)
+                                    android.util.Log.d("CR3Transfer", "Rating $rating found for ${file.name}")
+                                }
+                            } catch (_: Exception) { }
+                        }
+                    }
                     // Primary: the camera's embedded MTP thumbnail.
                     if (loadMtpThumbnail(file)) continue
                     // Fallback (RAW only): pull the preview JPEG straight out of the file.
@@ -363,6 +426,15 @@ class MainViewModel @Inject constructor(
         val current = _state.value
         if (current is TransferState.FilePicker) {
             _state.value = current.copy(selectedHandles = current.selectedHandles - handles.toSet())
+        }
+    }
+
+    /** Select only [targetHandles] out of [visibleHandles], deselecting other visible handles. */
+    fun selectOnly(visibleHandles: Collection<Int>, targetHandles: Collection<Int>) {
+        val current = _state.value
+        if (current is TransferState.FilePicker) {
+            val newSelected = (current.selectedHandles - visibleHandles.toSet()) + targetHandles.toSet()
+            _state.value = current.copy(selectedHandles = newSelected)
         }
     }
 

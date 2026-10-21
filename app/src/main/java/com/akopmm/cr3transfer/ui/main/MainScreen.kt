@@ -29,8 +29,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,6 +54,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
@@ -59,9 +65,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -75,6 +87,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.akopmm.cr3transfer.R
+import com.akopmm.cr3transfer.data.prefs.DefaultFolderInfo
 import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileType
 import com.akopmm.cr3transfer.domain.model.TransferState
@@ -92,15 +105,42 @@ fun MainScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val thumbnails by viewModel.thumbnails.collectAsState()
+    val ratings by viewModel.ratings.collectAsState()
     val hdrHandles by viewModel.hdrHandles.collectAsState()
     val showHistory by viewModel.showHistory.collectAsState()
     val sessionHistory by viewModel.sessionHistory.collectAsState()
+    val defaultFolder by viewModel.defaultFolder.collectAsState()
+    val autoClearImports by viewModel.autoClearImports.collectAsState()
+    val rememberCameraNicknames by viewModel.rememberCameraNicknames.collectAsState()
+    var showSettings by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val settingsFolderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("CR3Transfer", "Failed to take persistable URI permission: ${e.message}")
+            }
+            val displayName = DocumentFile.fromTreeUri(context, uri)?.name ?: uri.lastPathSegment ?: "Local Folder"
+            viewModel.saveDefaultFolder(uri.toString(), displayName)
+            Toast.makeText(context, "Default local folder set to $displayName", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
                 actions = {
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    }
                     IconButton(onClick = { viewModel.openHistory() }) {
                         Icon(Icons.Filled.List, contentDescription = "Transfer History")
                     }
@@ -114,7 +154,17 @@ fun MainScreen(
                 .padding(padding),
         ) {
             when (val currentState = state) {
-                is TransferState.Idle -> IdleContent()
+                is TransferState.Idle -> IdleContent(
+                    defaultFolder = defaultFolder,
+                    autoClearImports = autoClearImports,
+                    onSaveDefaultFolder = { uri, name -> viewModel.saveDefaultFolder(uri, name) },
+                    onClearDefaultFolder = { viewModel.clearDefaultFolder() },
+                    onClearPreviousImports = {
+                        viewModel.clearPreviousImports {
+                            Toast.makeText(context, "Previous imports cleared", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                )
                 is TransferState.CameraConnected -> CameraConnectedContent(
                     cameraName = currentState.cameraName,
                     onSaveCameraName = { viewModel.saveCameraName(it) },
@@ -123,17 +173,30 @@ fun MainScreen(
                 is TransferState.FilePicker -> FilePickerContent(
                     state = currentState,
                     thumbnails = thumbnails,
+                    ratings = ratings,
                     hdrHandles = hdrHandles,
                     onToggleFile = { viewModel.toggleFileSelection(it) },
                     onSelectAll = { viewModel.selectHandles(it) },
                     onSelectNone = { viewModel.deselectHandles(it) },
+                    onSelectOnly = { visible, target -> viewModel.selectOnly(visible, target) },
                     onToggleDeleteMode = { viewModel.toggleDeleteAfterTransfer() },
                     onStartTransfer = {
                         if (viewModel.checkStorageAndProceed()) onStartTransfer()
                     },
                 )
                 is TransferState.Transferring -> TransferringContent(currentState)
-                is TransferState.Done -> DoneContent(currentState)
+                is TransferState.Done -> DoneContent(
+                    state = currentState,
+                    defaultFolder = defaultFolder,
+                    autoClearImports = autoClearImports,
+                    onSaveDefaultFolder = { uri, name -> viewModel.saveDefaultFolder(uri, name) },
+                    onClearDefaultFolder = { viewModel.clearDefaultFolder() },
+                    onClearPreviousImports = {
+                        viewModel.clearPreviousImports {
+                            Toast.makeText(context, "Previous imports cleared", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                )
                 is TransferState.Error -> ErrorContent(currentState)
             }
         }
@@ -146,14 +209,36 @@ fun MainScreen(
                 TransferHistorySheet(sessions = sessionHistory)
             }
         }
+
+        if (showSettings) {
+            SettingsDialog(
+                defaultFolder = defaultFolder,
+                autoClearImports = autoClearImports,
+                rememberCameraNicknames = rememberCameraNicknames,
+                onSetDefaultFolder = { settingsFolderPickerLauncher.launch(null) },
+                onClearDefaultFolder = { viewModel.clearDefaultFolder() },
+                onSetAutoClearImports = { viewModel.setAutoClearImports(it) },
+                onSetRememberCameraNicknames = { viewModel.setRememberCameraNicknames(it) },
+                onClearPreviousImports = {
+                    viewModel.clearPreviousImports {
+                        Toast.makeText(context, "Previous imports cleared", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDismiss = { showSettings = false },
+            )
+        }
     }
 }
 
 @Composable
-private fun IdleContent() {
-    val context = LocalContext.current
+private fun IdleContent(
+    defaultFolder: DefaultFolderInfo?,
+    autoClearImports: Boolean = false,
+    onSaveDefaultFolder: (String, String) -> Unit,
+    onClearDefaultFolder: () -> Unit,
+    onClearPreviousImports: () -> Unit,
+) {
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
-    var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
 
     LaunchedEffect(Unit) {
         importFolders = withContext(Dispatchers.IO) { findImportFolders() }
@@ -181,28 +266,19 @@ private fun IdleContent() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { pickerTarget = ShareTarget.LIGHTROOM }) {
-                    Text("Import to Lightroom")
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { pickerTarget = ShareTarget.IMMICH }) {
-                    Text("Send to Immich")
-                }
+                ExportSection(
+                    importFolders = importFolders,
+                    defaultFolder = defaultFolder,
+                    autoClearImports = autoClearImports,
+                    onSaveDefaultFolder = onSaveDefaultFolder,
+                    onClearDefaultFolder = onClearDefaultFolder,
+                    onClearPreviousImports = {
+                        onClearPreviousImports()
+                        importFolders = emptyList()
+                    },
+                )
             }
         }
-    }
-
-    pickerTarget?.let { target ->
-        FolderPickerDialog(
-            folders = importFolders,
-            title = target.pickerTitle,
-            confirmLabel = target.confirmLabel,
-            onDismiss = { pickerTarget = null },
-            onConfirm = { selected ->
-                pickerTarget = null
-                launchCr3Share(context, selected, target)
-            },
-        )
     }
 }
 
@@ -297,23 +373,31 @@ private enum class PickerSort(val label: String, val comparator: Comparator<Came
 private fun FilePickerContent(
     state: TransferState.FilePicker,
     thumbnails: Map<Int, ByteArray>,
+    ratings: Map<Int, Int>,
     hdrHandles: Set<Int>,
     onToggleFile: (Int) -> Unit,
     onSelectAll: (List<Int>) -> Unit,
     onSelectNone: (List<Int>) -> Unit,
+    onSelectOnly: (List<Int>, List<Int>) -> Unit,
     onToggleDeleteMode: () -> Unit,
     onStartTransfer: () -> Unit,
 ) {
+    val context = LocalContext.current
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var sort by remember { mutableStateOf(PickerSort.NEWEST_FIRST) }
     var hiddenTypes by remember { mutableStateOf(emptySet<FileType>()) }
+    var starredOnly by remember { mutableStateOf(false) }
+    var infoFile by remember { mutableStateOf<Pair<CameraFile, Int?>?>(null) }
 
     // Only offer filtering for the types this camera actually gave us.
     val availableTypes = remember(state.files) {
         state.files.map { it.fileType }.distinct().sortedBy { it.ordinal }
     }
-    val visibleFiles = remember(state.files, sort, hiddenTypes) {
-        state.files.filterNot { it.fileType in hiddenTypes }.sortedWith(sort.comparator)
+    val visibleFiles = remember(state.files, sort, hiddenTypes, starredOnly, ratings) {
+        state.files
+            .filterNot { it.fileType in hiddenTypes }
+            .filter { !starredOnly || (ratings[it.objectHandle] ?: 0) > 0 }
+            .sortedWith(sort.comparator)
     }
     val visibleHandles = remember(visibleFiles) { visibleFiles.map { it.objectHandle } }
 
@@ -341,6 +425,14 @@ private fun FilePickerContent(
         )
     }
 
+    infoFile?.let { (file, rating) ->
+        FileInfoDialog(
+            file = file,
+            rating = rating,
+            onDismiss = { infoFile = null },
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         // Selection controls row
         Row(
@@ -354,6 +446,15 @@ private fun FilePickerContent(
             )
             Row {
                 TextButton(onClick = { onSelectAll(visibleHandles) }) { Text("All") }
+                TextButton(onClick = {
+                    val starredHandles = visibleFiles
+                        .filter { (ratings[it.objectHandle] ?: 0) > 0 }
+                        .map { it.objectHandle }
+                    if (starredHandles.isEmpty()) {
+                        Toast.makeText(context, "No starred files found", Toast.LENGTH_SHORT).show()
+                    }
+                    onSelectOnly(visibleHandles, starredHandles)
+                }) { Text("Starred") }
                 TextButton(onClick = { onSelectNone(visibleHandles) }) { Text("None") }
             }
         }
@@ -378,8 +479,14 @@ private fun FilePickerContent(
                     }
                 }
             }
+            Spacer(modifier = Modifier.width(4.dp))
+            FilterChip(
+                selected = starredOnly,
+                onClick = { starredOnly = !starredOnly },
+                label = { Text("★ Starred") },
+                modifier = Modifier.padding(end = 4.dp),
+            )
             if (availableTypes.size > 1) {
-                Spacer(modifier = Modifier.width(8.dp))
                 availableTypes.forEach { type ->
                     FilterChip(
                         selected = type !in hiddenTypes,
@@ -437,9 +544,11 @@ private fun FilePickerContent(
                 FileThumbnail(
                     file = file,
                     thumbnailData = thumbnails[file.objectHandle],
+                    rating = ratings[file.objectHandle],
                     isHdr = file.objectHandle in hdrHandles,
                     isSelected = file.objectHandle in state.selectedHandles,
                     onClick = { onToggleFile(file.objectHandle) },
+                    onShowInfo = { infoFile = Pair(file, ratings[file.objectHandle]) },
                 )
             }
         }
@@ -462,9 +571,11 @@ private fun FilePickerContent(
 private fun FileThumbnail(
     file: CameraFile,
     thumbnailData: ByteArray?,
+    rating: Int?,
     isHdr: Boolean,
     isSelected: Boolean,
     onClick: () -> Unit,
+    onShowInfo: () -> Unit,
 ) {
     val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
     val borderWidth = if (isSelected) 3.dp else 0.dp
@@ -517,7 +628,32 @@ private fun FileThumbnail(
             )
         }
 
-        // Selection indicator
+        // Star rating badge overlay at top-left
+        if (rating != null && rating > 0) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Star,
+                    contentDescription = "Rating $rating stars",
+                    tint = Color(0xFFFFD700),
+                    modifier = Modifier.size(12.dp),
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                Text(
+                    text = "$rating",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                )
+            }
+        }
+
+        // Selection indicator at top-right
         if (isSelected) {
             Icon(
                 imageVector = Icons.Filled.CheckCircle,
@@ -531,6 +667,23 @@ private fun FileThumbnail(
             )
         }
 
+        // Info icon button at bottom-right
+        IconButton(
+            onClick = onShowInfo,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(2.dp)
+                .size(24.dp)
+                .background(Color.Black.copy(alpha = 0.5f), CircleShape),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Info,
+                contentDescription = "File Info",
+                tint = Color.White,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+
         // Filename at bottom
         Text(
             text = file.name,
@@ -541,6 +694,7 @@ private fun FileThumbnail(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
+                .padding(end = 26.dp)
                 .background(Color.Black.copy(alpha = 0.5f))
                 .padding(2.dp),
             textAlign = TextAlign.Center,
@@ -596,10 +750,15 @@ private fun TransferringContent(state: TransferState.Transferring) {
 }
 
 @Composable
-private fun DoneContent(state: TransferState.Done) {
-    val context = LocalContext.current
+private fun DoneContent(
+    state: TransferState.Done,
+    defaultFolder: DefaultFolderInfo?,
+    autoClearImports: Boolean = false,
+    onSaveDefaultFolder: (String, String) -> Unit,
+    onClearDefaultFolder: () -> Unit,
+    onClearPreviousImports: () -> Unit,
+) {
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
-    var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
 
     LaunchedEffect(Unit) {
         importFolders = withContext(Dispatchers.IO) { findImportFolders() }
@@ -619,22 +778,116 @@ private fun DoneContent(state: TransferState.Done) {
                 Text("${state.failed} files failed", color = MaterialTheme.colorScheme.error)
             }
             Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = { pickerTarget = ShareTarget.LIGHTROOM },
-                enabled = importFolders.isNotEmpty(),
-            ) {
-                Text("Import to Lightroom")
+            ExportSection(
+                importFolders = importFolders,
+                defaultFolder = defaultFolder,
+                autoClearImports = autoClearImports,
+                onSaveDefaultFolder = onSaveDefaultFolder,
+                onClearDefaultFolder = onClearDefaultFolder,
+                onClearPreviousImports = {
+                    onClearPreviousImports()
+                    importFolders = emptyList()
+                },
+                showOpenFolderButton = true,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportSection(
+    importFolders: List<java.io.File>,
+    defaultFolder: DefaultFolderInfo?,
+    autoClearImports: Boolean = false,
+    onSaveDefaultFolder: (String, String) -> Unit,
+    onClearDefaultFolder: () -> Unit,
+    onClearPreviousImports: () -> Unit,
+    showOpenFolderButton: Boolean = false,
+) {
+    val context = LocalContext.current
+    var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
+    var pendingLocalFolders by remember { mutableStateOf<List<java.io.File>?>(null) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Clear Previous Imports?") },
+            text = {
+                Text("This will permanently delete all previously imported camera photos/videos from local device storage (DCIM/CanonImports and Movies/CanonImports) and reset transfer history. This cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirm = false
+                        onClearPreviousImports()
+                    },
+                ) { Text("Clear Imports", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        val folders = pendingLocalFolders
+        pendingLocalFolders = null
+        if (uri != null && folders != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("CR3Transfer", "Failed to take persistable URI permission: ${e.message}")
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = { pickerTarget = ShareTarget.IMMICH },
-                enabled = importFolders.isNotEmpty(),
-            ) {
-                Text("Send to Immich")
+            val displayName = DocumentFile.fromTreeUri(context, uri)?.name ?: uri.lastPathSegment ?: "Local Folder"
+            onSaveDefaultFolder(uri.toString(), displayName)
+
+            scope.launch {
+                copyFoldersToLocalUri(context, folders, uri, autoClearImports)
             }
+        }
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Button(
+            onClick = { pickerTarget = ShareTarget.LIGHTROOM },
+            enabled = importFolders.isNotEmpty(),
+        ) {
+            Text("Import to Lightroom")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { pickerTarget = ShareTarget.IMMICH },
+            enabled = importFolders.isNotEmpty(),
+        ) {
+            Text("Send to Immich")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { pickerTarget = ShareTarget.LOCAL_FOLDER },
+            enabled = importFolders.isNotEmpty(),
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Transfer to Local Folder")
+                if (defaultFolder != null) {
+                    Text(
+                        text = "Default: ${defaultFolder.fullPath}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
+                    )
+                }
+            }
+        }
+        if (showOpenFolderButton) {
             Spacer(modifier = Modifier.height(8.dp))
             Button(onClick = {
-                val uri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADCIM%2FCanonImports")
+                val uri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADCIM%2FCanonImports")
                 val intent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, "vnd.android.document/directory")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -644,7 +897,7 @@ private fun DoneContent(state: TransferState.Done) {
                 } catch (_: Exception) {
                     try {
                         val fallback = Intent(Intent.ACTION_VIEW).apply {
-                            data = android.net.Uri.parse("content://com.android.externalstorage.documents/root/primary")
+                            data = Uri.parse("content://com.android.externalstorage.documents/root/primary")
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK
                         }
                         context.startActivity(fallback)
@@ -654,20 +907,128 @@ private fun DoneContent(state: TransferState.Done) {
                 Text(stringResource(R.string.open_folder))
             }
         }
+        if (importFolders.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = { showClearConfirm = true }) {
+                Text("Clear Previous Imports", color = MaterialTheme.colorScheme.error)
+            }
+        }
     }
 
     pickerTarget?.let { target ->
+        val isLocalAndDefaultSet = target == ShareTarget.LOCAL_FOLDER && defaultFolder != null
         FolderPickerDialog(
             folders = importFolders,
             title = target.pickerTitle,
-            confirmLabel = target.confirmLabel,
+            confirmLabel = if (defaultFolder != null && target == ShareTarget.LOCAL_FOLDER) "Transfer to ${defaultFolder.fullPath}" else target.confirmLabel,
+            secondaryButtonLabel = if (isLocalAndDefaultSet) "Choose different folder" else null,
+            onSecondaryClick = if (isLocalAndDefaultSet) {
+                { selected ->
+                    pickerTarget = null
+                    pendingLocalFolders = selected
+                    folderPickerLauncher.launch(null)
+                }
+            } else null,
             onDismiss = { pickerTarget = null },
             onConfirm = { selected ->
                 pickerTarget = null
-                launchCr3Share(context, selected, target)
+                if (target == ShareTarget.LOCAL_FOLDER) {
+                    if (defaultFolder != null) {
+                        val uri = defaultFolder.uri
+                        val doc = DocumentFile.fromTreeUri(context, uri)
+                        if (doc != null && doc.canWrite()) {
+                            scope.launch {
+                                copyFoldersToLocalUri(context, selected, uri, autoClearImports)
+                            }
+                        } else {
+                            Toast.makeText(context, "Default folder inaccessible. Please select a new folder.", Toast.LENGTH_SHORT).show()
+                            onClearDefaultFolder()
+                            pendingLocalFolders = selected
+                            folderPickerLauncher.launch(null)
+                        }
+                    } else {
+                        pendingLocalFolders = selected
+                        folderPickerLauncher.launch(null)
+                    }
+                } else {
+                    launchCr3Share(context, selected, target)
+                }
             },
         )
     }
+}
+
+@Composable
+private fun FileInfoDialog(
+    file: CameraFile,
+    rating: Int?,
+    onDismiss: () -> Unit,
+) {
+    val dateStr = remember(file.dateCreated) {
+        if (file.dateCreated > 0) {
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(file.dateCreated))
+        } else "Unknown"
+    }
+    val sizeMbStr = remember(file.sizeBytes) {
+        String.format(Locale.getDefault(), "%.2f MB (%d bytes)", file.sizeBytes / (1024.0 * 1024.0), file.sizeBytes)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Image File Information") },
+        text = {
+            Column {
+                Text("Filename:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(file.name, style = MaterialTheme.typography.bodyLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("File Type:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = "${file.fileType.name} (${when (file.fileType) {
+                        FileType.CR3 -> "Canon RAW 3"
+                        FileType.CR2 -> "Canon RAW 2"
+                        FileType.JPG -> "JPEG Image"
+                        FileType.HEIF -> "HEIF Image"
+                        FileType.MP4 -> "MP4 Video"
+                        FileType.MOV -> "QuickTime Video"
+                    }})",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("File Size:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(sizeMbStr, style = MaterialTheme.typography.bodyMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("Capture Date:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(dateStr, style = MaterialTheme.typography.bodyMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("Camera Rating:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (rating != null && rating > 0) {
+                        for (star in 1..5) {
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = null,
+                                tint = if (star <= rating) Color(0xFFFFD700) else MaterialTheme.colorScheme.outlineVariant,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("$rating / 5 Stars", style = MaterialTheme.typography.bodyMedium)
+                    } else {
+                        Text("Unrated", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
 }
 
 @Composable
@@ -718,9 +1079,9 @@ private fun findImportFolders(): List<java.io.File> {
         .toList()
 }
 
-/** Apps a set of imported RAW folders can be handed off to via the Android share sheet. */
+/** Apps or locations a set of imported RAW folders can be handed off to. */
 private enum class ShareTarget(
-    val packageName: String,
+    val packageName: String?,
     val pickerTitle: String,
     val confirmLabel: String,
     val missingAppMessage: String,
@@ -743,9 +1104,91 @@ private enum class ShareTarget(
         confirmLabel = "Upload",
         missingAppMessage = "Immich is not installed",
     ),
+
+    LOCAL_FOLDER(
+        packageName = null,
+        pickerTitle = "Select folders to transfer",
+        confirmLabel = "Choose Folder",
+        missingAppMessage = "Could not open folder picker",
+    ),
+}
+
+private fun getMimeType(file: java.io.File): String {
+    return when (file.extension.uppercase(Locale.US)) {
+        "CR3" -> "image/x-canon-cr3"
+        "CR2" -> "image/x-canon-cr2"
+        "JPG", "JPEG" -> "image/jpeg"
+        "HIF", "HEIF", "HEIC" -> "image/heif"
+        "MP4" -> "video/mp4"
+        "MOV" -> "video/quicktime"
+        else -> "application/octet-stream"
+    }
+}
+
+private suspend fun copyFoldersToLocalUri(
+    context: Context,
+    folders: List<java.io.File>,
+    treeUri: Uri,
+    autoClearImports: Boolean = false,
+) = withContext(Dispatchers.IO) {
+    val rootDoc = DocumentFile.fromTreeUri(context, treeUri)
+    if (rootDoc == null || !rootDoc.canWrite()) {
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, "Cannot write to selected folder", Toast.LENGTH_SHORT).show()
+        }
+        return@withContext
+    }
+
+    var copiedCount = 0
+    val resolver = context.contentResolver
+
+    for (folder in folders) {
+        val dirName = if (folder.parentFile != null && folder.parentFile?.name != "CanonImports") {
+            "${folder.parentFile?.name}_${folder.name}"
+        } else {
+            folder.name
+        }
+        val subDirDoc = rootDoc.findFile(dirName) ?: rootDoc.createDirectory(dirName) ?: rootDoc
+        val folderFiles = folder.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.toList()
+
+        for (file in folderFiles) {
+            try {
+                val mimeType = getMimeType(file)
+                val destFileDoc = subDirDoc.findFile(file.name) ?: subDirDoc.createFile(mimeType, file.name)
+                if (destFileDoc != null) {
+                    resolver.openOutputStream(destFileDoc.uri)?.use { out ->
+                        file.inputStream().use { input ->
+                            input.copyTo(out)
+                        }
+                    }
+                    copiedCount++
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("CR3Transfer", "Error copying file ${file.name}", e)
+            }
+        }
+    }
+
+    if (autoClearImports && copiedCount > 0) {
+        for (folder in folders) {
+            if (folder.exists()) {
+                folder.deleteRecursively()
+            }
+        }
+    }
+
+    withContext(Dispatchers.Main) {
+        val msg = if (autoClearImports && copiedCount > 0) {
+            "Transferred $copiedCount ${if (copiedCount == 1) "file" else "files"} and cleared import staging files"
+        } else {
+            "Transferred $copiedCount ${if (copiedCount == 1) "file" else "files"} to local folder"
+        }
+        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+    }
 }
 
 private fun launchCr3Share(context: Context, folders: List<java.io.File>, target: ShareTarget) {
+    val targetPackage = target.packageName ?: return
     val rawFiles = folders.flatMap { folder ->
         folder.walkTopDown().filter { it.isRawImport() }.toList()
     }
@@ -758,7 +1201,7 @@ private fun launchCr3Share(context: Context, folders: List<java.io.File>, target
     val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
         type = "image/*"
         putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-        setPackage(target.packageName)
+        setPackage(targetPackage)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     try {
@@ -778,10 +1221,163 @@ private fun launchCr3Share(context: Context, folders: List<java.io.File>, target
 }
 
 @Composable
+private fun SettingsDialog(
+    defaultFolder: DefaultFolderInfo?,
+    autoClearImports: Boolean,
+    rememberCameraNicknames: Boolean,
+    onSetDefaultFolder: () -> Unit,
+    onClearDefaultFolder: () -> Unit,
+    onSetAutoClearImports: (Boolean) -> Unit,
+    onSetRememberCameraNicknames: (Boolean) -> Unit,
+    onClearPreviousImports: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Clear Previous Imports?") },
+            text = {
+                Text("This will permanently delete all previously imported camera photos/videos from local device storage (DCIM/CanonImports and Movies/CanonImports) and reset transfer history. This cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirm = false
+                        onDismiss()
+                        onClearPreviousImports()
+                    },
+                ) { Text("Clear Imports", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Settings") },
+        text = {
+            Column {
+                Text(
+                    text = "Default Local Folder",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (defaultFolder != null) defaultFolder.fullPath else "Not set (will prompt on transfer)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (defaultFolder != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    if (defaultFolder != null) {
+                        TextButton(onClick = onClearDefaultFolder) {
+                            Text("Clear Folder")
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Button(onClick = {
+                        onDismiss()
+                        onSetDefaultFolder()
+                    }) {
+                        Text(if (defaultFolder != null) "Change Folder" else "Set Default Folder")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = "Clear import files after transfer",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Automatically delete local staging files (DCIM/CanonImports) once transfer to local folder is complete",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = autoClearImports,
+                        onCheckedChange = onSetAutoClearImports,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = "Remember camera nicknames",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Save and reuse custom camera nicknames across connection sessions",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = rememberCameraNicknames,
+                        onCheckedChange = onSetRememberCameraNicknames,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Storage & Imports",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = { showClearConfirm = true },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Clear Previous Imports Now")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+@Composable
 private fun FolderPickerDialog(
     folders: List<java.io.File>,
     title: String,
     confirmLabel: String,
+    secondaryButtonLabel: String? = null,
+    onSecondaryClick: ((List<java.io.File>) -> Unit)? = null,
     onDismiss: () -> Unit,
     onConfirm: (List<java.io.File>) -> Unit,
 ) {
@@ -824,13 +1420,23 @@ private fun FolderPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = {
-                    // FIX: Check absolutePath instead of name
-                    onConfirm(folders.filter { it.absolutePath in selected })
-                },
-                enabled = selected.isNotEmpty(),
-            ) { Text(confirmLabel) }
+            Row {
+                if (secondaryButtonLabel != null && onSecondaryClick != null) {
+                    TextButton(
+                        onClick = {
+                            onSecondaryClick(folders.filter { it.absolutePath in selected })
+                        },
+                        enabled = selected.isNotEmpty(),
+                    ) { Text(secondaryButtonLabel) }
+                }
+                TextButton(
+                    onClick = {
+                        // FIX: Check absolutePath instead of name
+                        onConfirm(folders.filter { it.absolutePath in selected })
+                    },
+                    enabled = selected.isNotEmpty(),
+                ) { Text(confirmLabel) }
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

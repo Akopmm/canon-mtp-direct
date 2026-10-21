@@ -180,6 +180,27 @@ class ThumbnailUtilsTest {
         assertEquals(real.toList(), found?.toList())
     }
 
+    @Test
+    fun extractRating_parsesXmpRating() {
+        val xmpHeader = "<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?> <xmp:Rating>4</xmp:Rating> </xpacket>".toByteArray()
+        val rating = ThumbnailUtils.extractRating(xmpHeader)
+        assertEquals(4, rating)
+    }
+
+    @Test
+    fun extractRating_parsesXmpAttributeRating() {
+        val xmpHeader = "<x:xmpmeta><rdf:Description xmp:Rating=\"5\"/></x:xmpmeta>".toByteArray()
+        val rating = ThumbnailUtils.extractRating(xmpHeader)
+        assertEquals(5, rating)
+    }
+
+    @Test
+    fun extractRating_returnsNullWhenUnrated() {
+        val header = "<?xpacket begin=''?> <xmp:Rating>0</xmp:Rating>".toByteArray()
+        val rating = ThumbnailUtils.extractRating(header)
+        assertNull(rating)
+    }
+
     /** A minimal FF D8 FF … FF D9 run of [size] bytes, tagged with [marker] for identification. */
     private fun jpeg(size: Int, marker: Int): ByteArray {
         val bytes = ByteArray(size)

@@ -37,6 +37,12 @@ This app talks to the camera **directly over MTP**, so it never touches that pic
 | 🧠 **Smart dedup** | Skips what you already transferred — per camera, checked against files on disk, survives a reinstall. |
 | 📤 **Send to Immich** | Hands transferred RAWs to the Immich app, which uploads them to your own server. |
 | 🎨 **Lightroom import** | Send one date folder or several, with or without the camera connected. |
+| 📁 **Local folder transfer** | Copy transferred folders directly to any custom local directory on your Android device with one-tap default folder memory. |
+| ⭐ **Camera ratings & selection** | Reads embedded Canon star ratings (1–5 stars) from CR3/CR2 headers, overlays ratings on thumbnails, and selects starred shots with one tap. |
+| ℹ️ **Image file information** | View full file details including capture date, size, format, and camera rating. |
+| ⚙️ **Auto-clear staging files** | Setting to automatically delete local import staging files after transfer to free phone storage. |
+| 🏷️ **Camera nicknames** | Save and remember custom camera nicknames across connection sessions. |
+| 🧹 **Clear previous imports** | Clear past imported staging files and reset transfer history anytime. |
 | 🔋 **Background transfers** | A foreground service keeps a long transfer alive while you use other apps. |
 | 📊 **Transfer history** | Past sessions with file counts, size and duration. |
 | 🗑️ **Optional delete after transfer** | Free the card as you go, behind a confirmation dialog. |
@@ -44,9 +50,15 @@ This app talks to the camera **directly over MTP**, so it never touches that pic
 ## Screenshots
 
 <p align="center">
-  <img src="docs/assets/screen-home.png" alt="Home screen" width="32%">
-  &nbsp;&nbsp;
-  <img src="docs/assets/screen-folders.png" alt="Choosing which date folders to send" width="32%">
+
+<img src="docs/assets/screen-camera.png" alt="Camera file picker with RAW thumbnails, camera ratings, and selection controls" width="18%">
+  &nbsp;
+<img src="docs/assets/screen-info.png" alt="Image file information modal with camera rating" width="18%">
+  &nbsp;
+<img src="docs/assets/screen-home.png" alt="Export panel for Lightroom, Immich, and Local Folder" width="18%">
+  &nbsp;
+<img src="docs/assets/screen-settings.png" alt="Settings menu displaying full default local folder path" width="18%">
+  &nbsp;
 </p>
 
 ## Install
@@ -77,7 +89,7 @@ On an **older DSLR** (EOS 760D/750D, 80D, 6D…) there is no such menu, but Wi-F
 1. Connect the camera to the phone (USB-C, or an OTG adapter on older bodies) — the app launches itself
 2. Pick what to transfer (sort, filter, or just take the pre-selected new files)
 3. Tap **Start Transfer**
-4. When it finishes, tap **Import to Lightroom**, **Send to Immich**, or **Open Folder**
+4. When it finishes, tap **Import to Lightroom**, **Send to Immich**, **Transfer to Local Folder**, or **Open Folder**
 
 Files land in:
 

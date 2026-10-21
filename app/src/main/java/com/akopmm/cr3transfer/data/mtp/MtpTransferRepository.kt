@@ -5,6 +5,8 @@ import android.media.MediaScannerConnection
 import android.mtp.MtpDevice
 import android.os.Environment
 import android.util.Log
+import com.akopmm.cr3transfer.data.prefs.TransferHistoryDataStore
+import com.akopmm.cr3transfer.data.prefs.TransferSessionRepository
 import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileStatus
 import com.akopmm.cr3transfer.domain.model.FileTransferStatus
@@ -47,7 +49,21 @@ data class ImportedNamesCache(
 class MtpTransferRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val deviceManager: MtpDeviceManager,
+    private val historyDataStore: TransferHistoryDataStore,
+    private val sessionRepository: TransferSessionRepository,
 ) {
+    suspend fun clearPreviousImports() = withContext(Dispatchers.IO) {
+        val dcimImports = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "CanonImports")
+        val moviesImports = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "CanonImports")
+        val appDirImports = File(context.getExternalFilesDir(null), "CanonImports")
+
+        if (dcimImports.exists()) dcimImports.deleteRecursively()
+        if (moviesImports.exists()) moviesImports.deleteRecursively()
+        if (appDirImports.exists()) appDirImports.deleteRecursively()
+
+        historyDataStore.clearAll()
+        sessionRepository.clearSessions()
+    }
     /** Single-file dedup check. Use [buildImportedNamesCache] when checking many files. */
     fun isAlreadyImported(fileName: String, fileType: FileType): Boolean {
         val root = if (fileType.isVideo) videoOutputDirectory else photoOutputDirectory
@@ -107,6 +123,13 @@ class MtpTransferRepository @Inject constructor(
 
             val success = withContext(Dispatchers.IO) {
                 try {
+                    if (!destDir.exists()) {
+                        destDir.mkdirs()
+                    }
+                    if (!destDir.exists()) {
+                        Log.e(TAG, "Destination directory does not exist and could not be created: ${destDir.absolutePath}")
+                        return@withContext false
+                    }
                     Log.d(TAG, "Importing ${file.name} (handle=0x${file.objectHandle.toString(16)}) to ${destFile.absolutePath}")
                     val imported = device.importFile(file.objectHandle, destFile.absolutePath)
                     Log.d(TAG, "importFile returned: $imported, file exists: ${destFile.exists()}, size: ${destFile.length()}")

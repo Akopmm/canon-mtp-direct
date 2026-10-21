@@ -37,4 +37,10 @@ class TransferHistoryDataStore @Inject constructor(
             (prefs[transferredKey] ?: emptySet()).contains(fileName)
         }
     }
+
+    suspend fun clearAll() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(transferredKey)
+        }
+    }
 }
