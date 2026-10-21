@@ -64,8 +64,8 @@ Canon bodies organize files in DCIM subfolders. Walk `getObjectHandles` recursiv
 ### Use importFile(), never getObject()
 `getObject()` loads entire file into memory. Use `MtpDevice.importFile(objectHandle, destFile)` instead.
 
-### Dedup by filename only
-Key is filename (e.g. `IMG_1234.CR3`), not full path — Canon reuses folder names across sessions. Store in DataStore as `Set<String>`.
+### Dedup: name + size + capture time, per camera
+Never dedup on the file name alone: Canon's counter wraps after 9999 (and restarts with the numbering mode or a new card), so a new `IMG_0001.CR3` can share its name with an old one. `domain/imports/DedupPolicy` compares name, size and capture time (each only when both sides know it — MTP reports objects ≥ 4 GB as size `0xFFFFFFFF`). Sources: the per-camera `ImportLedger` (plain `name⇥size⇥date` lines in `filesDir/import_ledger/`, seeded from disk the first time a camera is seen, so deleting phone copies doesn't re-offer shots) and the files in every known import root. The ledger only decides pre-selection; the transfer skips just the files that are on disk, so a shot ticked on purpose re-imports. Never overwrite on import: a taken name gets `_1`, `_2`, … (`DedupPolicy.freeName`).
 
 ### Destination path
 `data/imports/ImportStore` is the only place that knows where imports live — never build an import path anywhere else. The user picks the root (`domain/imports/ImportLocation`): by default photos go to `DCIM/CanonImports/<camera>/YYYY-MM-DD/` and videos to `Movies/CanonImports/<camera>/YYYY-MM-DD/` (`<camera>` = nickname or sanitised USB serial, see `MtpDeviceManager.sanitizeFolderName`); the date is the import day or, optionally, the capture day. Custom roots are plain paths on primary storage (written with File, thanks to All files access) — the folder picker only chooses the path. Every root ever used stays in `KnownRoots`, so dedup and the hand-off still see older imports. Create date subfolder with `File.mkdirs()`. After saving, call `MediaScannerConnection.scanFile()` with the MIME for the type (`image/x-canon-cr3`, `image/x-canon-cr2`, `video/quicktime`, …).
