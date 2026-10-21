@@ -140,15 +140,12 @@ class MainActivity : ComponentActivity() {
         val attachFilter = IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED)
         val detachFilter = IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(usbPermissionReceiver, permissionFilter, RECEIVER_NOT_EXPORTED)
-            registerReceiver(usbAttachReceiver, attachFilter, RECEIVER_EXPORTED)
-            registerReceiver(usbDetachReceiver, detachFilter, RECEIVER_EXPORTED)
-        } else {
-            registerReceiver(usbPermissionReceiver, permissionFilter)
-            registerReceiver(usbAttachReceiver, attachFilter)
-            registerReceiver(usbDetachReceiver, detachFilter)
-        }
+        // ContextCompat applies the export flag on every API level (lint: UnspecifiedRegisterReceiverFlag).
+        // The permission result is our own PendingIntent, so it stays unexported; attach/detach come
+        // from the system.
+        ContextCompat.registerReceiver(this, usbPermissionReceiver, permissionFilter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(this, usbAttachReceiver, attachFilter, ContextCompat.RECEIVER_EXPORTED)
+        ContextCompat.registerReceiver(this, usbDetachReceiver, detachFilter, ContextCompat.RECEIVER_EXPORTED)
     }
 
     private fun scanForConnectedCameras() {
