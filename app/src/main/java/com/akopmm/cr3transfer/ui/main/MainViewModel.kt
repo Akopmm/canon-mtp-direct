@@ -1,11 +1,18 @@
 package com.akopmm.cr3transfer.ui.main
 
+import android.content.Context
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.hardware.usb.UsbDevice
 import android.os.Environment
 import android.os.StatFs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.documentfile.provider.DocumentFile
+import com.akopmm.cr3transfer.data.export.DocumentFileExportDirectory
+import com.akopmm.cr3transfer.data.export.ExportProgress
+import com.akopmm.cr3transfer.data.export.ExportResult
+import com.akopmm.cr3transfer.data.export.LocalFolderExporter
 import com.akopmm.cr3transfer.data.mtp.MtpDeviceManager
 import com.akopmm.cr3transfer.data.mtp.MtpTransferRepository
 import com.akopmm.cr3transfer.data.prefs.CameraNameRepository
@@ -19,12 +26,17 @@ import com.akopmm.cr3transfer.domain.model.TransferState
 import com.akopmm.cr3transfer.domain.usecase.ScanCameraUseCase
 import com.akopmm.cr3transfer.util.ThumbnailUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -32,6 +44,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val deviceManager: MtpDeviceManager,
     private val scanCameraUseCase: ScanCameraUseCase,
     private val transferRepository: MtpTransferRepository,
@@ -70,6 +83,45 @@ class MainViewModel @Inject constructor(
     fun setRememberCameraNicknames(enabled: Boolean) {
         viewModelScope.launch {
             cameraNameRepository.setRememberNicknames(enabled)
+        }
+    }
+
+    private val _localExport = MutableStateFlow<ExportProgress?>(null)
+    /** Non-null while a local-folder export runs. */
+    val localExport: StateFlow<ExportProgress?> = _localExport.asStateFlow()
+
+    private val _localExportResults = MutableSharedFlow<ExportResult?>(extraBufferCapacity = 1)
+    /** One event per finished export; null when the destination couldn't be written at all. */
+    val localExportResults: SharedFlow<ExportResult?> = _localExportResults
+
+    private val _importsVersion = MutableStateFlow(0)
+    /** Bumped whenever the local import folders change (export with auto-clear, clear imports). */
+    val importsVersion: StateFlow<Int> = _importsVersion.asStateFlow()
+
+    /**
+     * Copies [folders] to the SAF tree [treeUri]. Runs in viewModelScope so rotating or leaving the
+     * screen doesn't cut a multi-GB copy short.
+     */
+    fun exportToLocalFolder(folders: List<java.io.File>, treeUri: Uri) {
+        if (_localExport.value != null) return
+        _localExport.value = ExportProgress(0, 0, null)
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val root = DocumentFile.fromTreeUri(appContext, treeUri)?.takeIf { it.canWrite() }
+                        ?: return@withContext null
+                    LocalFolderExporter().export(
+                        folders = folders,
+                        root = DocumentFileExportDirectory(appContext.contentResolver, root),
+                        clearSources = autoClearImports.value,
+                        onProgress = { _localExport.value = it },
+                    )
+                }
+                if (result?.clearedFolders?.isNotEmpty() == true) _importsVersion.update { it + 1 }
+                _localExportResults.tryEmit(result)
+            } finally {
+                _localExport.value = null
+            }
         }
     }
 
@@ -154,8 +206,10 @@ class MainViewModel @Inject constructor(
     fun onCameraDisconnected() {
         deviceManager.close()
         scannedFiles = emptyList()
+        thumbnailJob?.cancel()
         _thumbnails.value = emptyMap()
         _hdrHandles.value = emptySet()
+        _ratings.value = emptyMap()
         _state.value = TransferState.Idle
     }
 
@@ -223,30 +277,22 @@ class MainViewModel @Inject constructor(
     fun clearPreviousImports(onComplete: () -> Unit = {}) {
         viewModelScope.launch {
             transferRepository.clearPreviousImports()
+            _importsVersion.update { it + 1 }
             withContext(Dispatchers.Main) {
                 onComplete()
             }
         }
     }
 
+    private var thumbnailJob: Job? = null
+
     private fun loadThumbnails(files: List<CameraFile>) {
+        thumbnailJob?.cancel()
         _hdrHandles.value = emptySet()
         _ratings.value = emptyMap()
-        viewModelScope.launch {
+        thumbnailJob = viewModelScope.launch {
             for (file in files) {
                 try {
-                    if (file.fileType.isRaw) {
-                        viewModelScope.launch(Dispatchers.IO) {
-                            try {
-                                val head = deviceManager.readObjectHead(file.objectHandle, CR2_HEAD_READ_BYTES)
-                                val rating = ThumbnailUtils.extractRating(head)
-                                if (rating != null && rating in 1..5) {
-                                    _ratings.value = _ratings.value + (file.objectHandle to rating)
-                                    android.util.Log.d("CR3Transfer", "Rating $rating found for ${file.name}")
-                                }
-                            } catch (_: Exception) { }
-                        }
-                    }
                     // Primary: the camera's embedded MTP thumbnail.
                     if (loadMtpThumbnail(file)) continue
                     // Fallback (RAW only): pull the preview JPEG straight out of the file.
@@ -259,6 +305,29 @@ class MainViewModel @Inject constructor(
                     android.util.Log.w("CR3Transfer", "Failed to load thumbnail for ${file.name}: ${e.message}")
                 }
             }
+            loadRatings(files)
+        }
+    }
+
+    /**
+     * Star ratings sit in the RAW header (XMP / Exif 0x4746), so each needs its own 64 KB read. They run
+     * one at a time after the thumbnails rather than in parallel with them: MTP serialises requests
+     * anyway, and a burst of hundreds of reads only delays the thumbnails. Stops once the picker is
+     * left (e.g. a transfer started) so it never competes with the transfer.
+     */
+    private suspend fun loadRatings(files: List<CameraFile>) {
+        for (file in files) {
+            if (!file.fileType.isRaw) continue
+            if (_state.value !is TransferState.FilePicker) return
+            val rating = try {
+                withContext(Dispatchers.IO) {
+                    ThumbnailUtils.extractRating(deviceManager.readObjectHead(file.objectHandle, RATING_HEAD_READ_BYTES))
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CR3Transfer", "Rating read failed for ${file.name}: ${e.message}")
+                null
+            }
+            if (rating != null) _ratings.update { it + (file.objectHandle to rating) }
         }
     }
 
@@ -503,5 +572,10 @@ class MainViewModel @Inject constructor(
         // A CR2 only needs its TIFF directories, which are grouped at the very start of the file
         // — the preview itself is fetched afterwards by the offset they give.
         private const val CR2_HEAD_READ_BYTES = 64 * 1024
+
+        // A CR3 keeps its XMP packet (with xmp:Rating) after the moov box: ~24–37 KB in on an R7,
+        // but ~66 KB on an R8, whose embedded THMB is bigger. 64 KB missed those. A CR2 has its
+        // IFD0 Rating tag right at the start.
+        private const val RATING_HEAD_READ_BYTES = 128 * 1024
     }
 }

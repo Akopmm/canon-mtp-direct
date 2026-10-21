@@ -279,7 +279,7 @@ object ThumbnailUtils {
             }
             // Tag 0x4746 (Rating), Big Endian: 47 46 00 03 00 00 00 01 00 [val]
             if (data[i].u() == 0x47 && data[i + 1].u() == 0x46 &&
-                data[i + 2].u() == 0x00 && data[i + 3].u() == 0x00 &&
+                data[i + 2].u() == 0x00 && data[i + 3].u() == 0x03 &&
                 data[i + 4].u() == 0x00 && data[i + 5].u() == 0x00 &&
                 data[i + 6].u() == 0x00 && data[i + 7].u() == 0x01 &&
                 data[i + 8].u() == 0x00

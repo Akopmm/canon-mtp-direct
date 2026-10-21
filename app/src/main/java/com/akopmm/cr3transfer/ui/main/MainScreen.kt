@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -65,11 +66,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -87,6 +86,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.akopmm.cr3transfer.R
+import com.akopmm.cr3transfer.data.export.ExportProgress
+import com.akopmm.cr3transfer.data.export.ExportResult
 import com.akopmm.cr3transfer.data.prefs.DefaultFolderInfo
 import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileType
@@ -112,9 +113,17 @@ fun MainScreen(
     val defaultFolder by viewModel.defaultFolder.collectAsState()
     val autoClearImports by viewModel.autoClearImports.collectAsState()
     val rememberCameraNicknames by viewModel.rememberCameraNicknames.collectAsState()
+    val localExport by viewModel.localExport.collectAsState()
+    val importsVersion by viewModel.importsVersion.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        viewModel.localExportResults.collect { result ->
+            Toast.makeText(context, localExportMessage(result), Toast.LENGTH_LONG).show()
+        }
+    }
+    localExport?.let { LocalExportProgressDialog(it) }
     val settingsFolderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -159,6 +168,8 @@ fun MainScreen(
                     autoClearImports = autoClearImports,
                     onSaveDefaultFolder = { uri, name -> viewModel.saveDefaultFolder(uri, name) },
                     onClearDefaultFolder = { viewModel.clearDefaultFolder() },
+                    importsVersion = importsVersion,
+                    onExportToLocal = { folders, uri -> viewModel.exportToLocalFolder(folders, uri) },
                     onClearPreviousImports = {
                         viewModel.clearPreviousImports {
                             Toast.makeText(context, "Previous imports cleared", Toast.LENGTH_SHORT).show()
@@ -191,6 +202,8 @@ fun MainScreen(
                     autoClearImports = autoClearImports,
                     onSaveDefaultFolder = { uri, name -> viewModel.saveDefaultFolder(uri, name) },
                     onClearDefaultFolder = { viewModel.clearDefaultFolder() },
+                    importsVersion = importsVersion,
+                    onExportToLocal = { folders, uri -> viewModel.exportToLocalFolder(folders, uri) },
                     onClearPreviousImports = {
                         viewModel.clearPreviousImports {
                             Toast.makeText(context, "Previous imports cleared", Toast.LENGTH_SHORT).show()
@@ -236,11 +249,13 @@ private fun IdleContent(
     autoClearImports: Boolean = false,
     onSaveDefaultFolder: (String, String) -> Unit,
     onClearDefaultFolder: () -> Unit,
+    importsVersion: Int,
+    onExportToLocal: (List<java.io.File>, Uri) -> Unit,
     onClearPreviousImports: () -> Unit,
 ) {
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(importsVersion) {
         importFolders = withContext(Dispatchers.IO) { findImportFolders() }
     }
 
@@ -272,6 +287,7 @@ private fun IdleContent(
                     autoClearImports = autoClearImports,
                     onSaveDefaultFolder = onSaveDefaultFolder,
                     onClearDefaultFolder = onClearDefaultFolder,
+                    onExportToLocal = onExportToLocal,
                     onClearPreviousImports = {
                         onClearPreviousImports()
                         importFolders = emptyList()
@@ -756,11 +772,13 @@ private fun DoneContent(
     autoClearImports: Boolean = false,
     onSaveDefaultFolder: (String, String) -> Unit,
     onClearDefaultFolder: () -> Unit,
+    importsVersion: Int,
+    onExportToLocal: (List<java.io.File>, Uri) -> Unit,
     onClearPreviousImports: () -> Unit,
 ) {
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(importsVersion) {
         importFolders = withContext(Dispatchers.IO) { findImportFolders() }
     }
 
@@ -784,6 +802,7 @@ private fun DoneContent(
                 autoClearImports = autoClearImports,
                 onSaveDefaultFolder = onSaveDefaultFolder,
                 onClearDefaultFolder = onClearDefaultFolder,
+                onExportToLocal = onExportToLocal,
                 onClearPreviousImports = {
                     onClearPreviousImports()
                     importFolders = emptyList()
@@ -801,6 +820,7 @@ private fun ExportSection(
     autoClearImports: Boolean = false,
     onSaveDefaultFolder: (String, String) -> Unit,
     onClearDefaultFolder: () -> Unit,
+    onExportToLocal: (List<java.io.File>, Uri) -> Unit,
     onClearPreviousImports: () -> Unit,
     showOpenFolderButton: Boolean = false,
 ) {
@@ -808,14 +828,13 @@ private fun ExportSection(
     var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
     var pendingLocalFolders by remember { mutableStateOf<List<java.io.File>?>(null) }
     var showClearConfirm by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
 
     if (showClearConfirm) {
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
             title = { Text("Clear Previous Imports?") },
             text = {
-                Text("This will permanently delete all previously imported camera photos/videos from local device storage (DCIM/CanonImports and Movies/CanonImports) and reset transfer history. This cannot be undone.")
+                Text(CLEAR_IMPORTS_WARNING)
             },
             confirmButton = {
                 TextButton(
@@ -848,9 +867,7 @@ private fun ExportSection(
             val displayName = DocumentFile.fromTreeUri(context, uri)?.name ?: uri.lastPathSegment ?: "Local Folder"
             onSaveDefaultFolder(uri.toString(), displayName)
 
-            scope.launch {
-                copyFoldersToLocalUri(context, folders, uri, autoClearImports)
-            }
+            onExportToLocal(folders, uri)
         }
     }
 
@@ -937,9 +954,7 @@ private fun ExportSection(
                         val uri = defaultFolder.uri
                         val doc = DocumentFile.fromTreeUri(context, uri)
                         if (doc != null && doc.canWrite()) {
-                            scope.launch {
-                                copyFoldersToLocalUri(context, selected, uri, autoClearImports)
-                            }
+                            onExportToLocal(selected, uri)
                         } else {
                             Toast.makeText(context, "Default folder inaccessible. Please select a new folder.", Toast.LENGTH_SHORT).show()
                             onClearDefaultFolder()
@@ -1113,80 +1128,6 @@ private enum class ShareTarget(
     ),
 }
 
-private fun getMimeType(file: java.io.File): String {
-    return when (file.extension.uppercase(Locale.US)) {
-        "CR3" -> "image/x-canon-cr3"
-        "CR2" -> "image/x-canon-cr2"
-        "JPG", "JPEG" -> "image/jpeg"
-        "HIF", "HEIF", "HEIC" -> "image/heif"
-        "MP4" -> "video/mp4"
-        "MOV" -> "video/quicktime"
-        else -> "application/octet-stream"
-    }
-}
-
-private suspend fun copyFoldersToLocalUri(
-    context: Context,
-    folders: List<java.io.File>,
-    treeUri: Uri,
-    autoClearImports: Boolean = false,
-) = withContext(Dispatchers.IO) {
-    val rootDoc = DocumentFile.fromTreeUri(context, treeUri)
-    if (rootDoc == null || !rootDoc.canWrite()) {
-        withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Cannot write to selected folder", Toast.LENGTH_SHORT).show()
-        }
-        return@withContext
-    }
-
-    var copiedCount = 0
-    val resolver = context.contentResolver
-
-    for (folder in folders) {
-        val dirName = if (folder.parentFile != null && folder.parentFile?.name != "CanonImports") {
-            "${folder.parentFile?.name}_${folder.name}"
-        } else {
-            folder.name
-        }
-        val subDirDoc = rootDoc.findFile(dirName) ?: rootDoc.createDirectory(dirName) ?: rootDoc
-        val folderFiles = folder.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.toList()
-
-        for (file in folderFiles) {
-            try {
-                val mimeType = getMimeType(file)
-                val destFileDoc = subDirDoc.findFile(file.name) ?: subDirDoc.createFile(mimeType, file.name)
-                if (destFileDoc != null) {
-                    resolver.openOutputStream(destFileDoc.uri)?.use { out ->
-                        file.inputStream().use { input ->
-                            input.copyTo(out)
-                        }
-                    }
-                    copiedCount++
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("CR3Transfer", "Error copying file ${file.name}", e)
-            }
-        }
-    }
-
-    if (autoClearImports && copiedCount > 0) {
-        for (folder in folders) {
-            if (folder.exists()) {
-                folder.deleteRecursively()
-            }
-        }
-    }
-
-    withContext(Dispatchers.Main) {
-        val msg = if (autoClearImports && copiedCount > 0) {
-            "Transferred $copiedCount ${if (copiedCount == 1) "file" else "files"} and cleared import staging files"
-        } else {
-            "Transferred $copiedCount ${if (copiedCount == 1) "file" else "files"} to local folder"
-        }
-        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-    }
-}
-
 private fun launchCr3Share(context: Context, folders: List<java.io.File>, target: ShareTarget) {
     val targetPackage = target.packageName ?: return
     val rawFiles = folders.flatMap { folder ->
@@ -1239,7 +1180,7 @@ private fun SettingsDialog(
             onDismissRequest = { showClearConfirm = false },
             title = { Text("Clear Previous Imports?") },
             text = {
-                Text("This will permanently delete all previously imported camera photos/videos from local device storage (DCIM/CanonImports and Movies/CanonImports) and reset transfer history. This cannot be undone.")
+                Text(CLEAR_IMPORTS_WARNING)
             },
             confirmButton = {
                 TextButton(
@@ -1441,5 +1382,49 @@ private fun FolderPickerDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
+    )
+}
+
+private const val CLEAR_IMPORTS_WARNING =
+    "This permanently deletes every imported photo and video on this phone (DCIM/CanonImports and " +
+        "Movies/CanonImports) — copies already sent to Immich, Lightroom or another folder are not affected. " +
+        "Transfer history is reset too, so the next time the camera is connected every file on the card " +
+        "is offered as new. This cannot be undone."
+
+private fun localExportMessage(result: ExportResult?): String {
+    if (result == null) return "Cannot write to the selected folder"
+    val n = result.verified
+    val copied = "Transferred $n ${if (n == 1) "file" else "files"} to local folder"
+    return when {
+        result.failed.isNotEmpty() ->
+            "$copied, ${result.failed.size} failed — nothing was deleted from folders with failures"
+        result.clearedFolders.isNotEmpty() -> "$copied and cleared the import staging files"
+        else -> copied
+    }
+}
+
+@Composable
+private fun LocalExportProgressDialog(progress: ExportProgress) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Copying to local folder") },
+        text = {
+            Column {
+                if (progress.total > 0) {
+                    LinearProgressIndicator(
+                        progress = { progress.done.toFloat() / progress.total },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "${progress.done} / ${progress.total}" + (progress.currentFile?.let { " · $it" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {},
     )
 }

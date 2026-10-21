@@ -24,34 +24,40 @@ data class DefaultFolderInfo(
 ) {
     val uri: Uri get() = Uri.parse(uriString)
 
+    /** e.g. "/Internal Storage/Photography/Raw" for display. */
     val fullPath: String
-        get() {
-            return try {
-                val parsedUri = uri
-                val path = parsedUri.path ?: return displayName
-                val treeSegment = if (path.contains("/tree/")) {
-                    path.substringAfter("/tree/").substringBefore("/document/")
-                } else {
-                    path
+        get() = try {
+            uri.path?.let { describeTreePath(it) } ?: displayName
+        } catch (_: Exception) {
+            displayName
+        }
+
+    companion object {
+        /**
+         * Turns an already-decoded SAF tree path (`/tree/primary:Photography/Raw`, as returned by
+         * Uri.getPath()) into a readable location. Pure so it can be unit-tested without Android.
+         */
+        fun describeTreePath(path: String): String {
+            val treeId = if (path.contains("/tree/")) {
+                path.substringAfter("/tree/").substringBefore("/document/")
+            } else {
+                path
+            }
+            return when {
+                treeId.startsWith("primary:") -> {
+                    val subPath = treeId.substringAfter("primary:")
+                    if (subPath.isBlank()) "/Internal Storage" else "/Internal Storage/$subPath"
                 }
-                val decoded = Uri.decode(treeSegment)
-                when {
-                    decoded.startsWith("primary:") -> {
-                        val subPath = decoded.substringAfter("primary:")
-                        if (subPath.isBlank()) "/Internal Storage" else "/Internal Storage/$subPath"
-                    }
-                    decoded.contains(":") -> {
-                        val volume = decoded.substringBefore(":")
-                        val subPath = decoded.substringAfter(":")
-                        if (subPath.isBlank()) "/SD Card ($volume)" else "/SD Card ($volume)/$subPath"
-                    }
-                    decoded.startsWith("/") -> decoded
-                    else -> "/$decoded"
+                treeId.contains(":") -> {
+                    val volume = treeId.substringBefore(":")
+                    val subPath = treeId.substringAfter(":")
+                    if (subPath.isBlank()) "/SD Card ($volume)" else "/SD Card ($volume)/$subPath"
                 }
-            } catch (_: Exception) {
-                displayName
+                treeId.startsWith("/") -> treeId
+                else -> "/$treeId"
             }
         }
+    }
 }
 
 @Singleton
