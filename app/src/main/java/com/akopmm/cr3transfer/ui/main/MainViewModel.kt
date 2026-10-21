@@ -1,23 +1,14 @@
 package com.akopmm.cr3transfer.ui.main
 
-import android.content.Context
 import android.graphics.BitmapFactory
-import android.net.Uri
 import android.hardware.usb.UsbDevice
 import android.os.Environment
 import android.os.StatFs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.documentfile.provider.DocumentFile
-import com.akopmm.cr3transfer.data.export.DocumentFileExportDirectory
-import com.akopmm.cr3transfer.data.export.ExportProgress
-import com.akopmm.cr3transfer.data.export.ExportResult
-import com.akopmm.cr3transfer.data.export.LocalFolderExporter
 import com.akopmm.cr3transfer.data.mtp.MtpDeviceManager
 import com.akopmm.cr3transfer.data.mtp.MtpTransferRepository
 import com.akopmm.cr3transfer.data.prefs.CameraNameRepository
-import com.akopmm.cr3transfer.data.prefs.DefaultFolderInfo
-import com.akopmm.cr3transfer.data.prefs.DefaultFolderRepository
 import com.akopmm.cr3transfer.data.prefs.TransferSessionRepository
 import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileType
@@ -26,16 +17,11 @@ import com.akopmm.cr3transfer.domain.model.TransferState
 import com.akopmm.cr3transfer.domain.usecase.ScanCameraUseCase
 import com.akopmm.cr3transfer.util.ThumbnailUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,86 +30,12 @@ import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    @ApplicationContext private val appContext: Context,
     private val deviceManager: MtpDeviceManager,
     private val scanCameraUseCase: ScanCameraUseCase,
     private val transferRepository: MtpTransferRepository,
     private val cameraNameRepository: CameraNameRepository,
     private val sessionRepository: TransferSessionRepository,
-    private val defaultFolderRepository: DefaultFolderRepository,
 ) : ViewModel() {
-
-    val defaultFolder: StateFlow<DefaultFolderInfo?> = defaultFolderRepository.defaultFolder
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
-    val autoClearImports: StateFlow<Boolean> = defaultFolderRepository.autoClearImports
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    val rememberCameraNicknames: StateFlow<Boolean> = cameraNameRepository.rememberNicknames
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-
-    fun saveDefaultFolder(uriString: String, displayName: String) {
-        viewModelScope.launch {
-            defaultFolderRepository.saveDefaultFolder(uriString, displayName)
-        }
-    }
-
-    fun clearDefaultFolder() {
-        viewModelScope.launch {
-            defaultFolderRepository.clearDefaultFolder()
-        }
-    }
-
-    fun setAutoClearImports(enabled: Boolean) {
-        viewModelScope.launch {
-            defaultFolderRepository.setAutoClearImports(enabled)
-        }
-    }
-
-    fun setRememberCameraNicknames(enabled: Boolean) {
-        viewModelScope.launch {
-            cameraNameRepository.setRememberNicknames(enabled)
-        }
-    }
-
-    private val _localExport = MutableStateFlow<ExportProgress?>(null)
-    /** Non-null while a local-folder export runs. */
-    val localExport: StateFlow<ExportProgress?> = _localExport.asStateFlow()
-
-    private val _localExportResults = MutableSharedFlow<ExportResult?>(extraBufferCapacity = 1)
-    /** One event per finished export; null when the destination couldn't be written at all. */
-    val localExportResults: SharedFlow<ExportResult?> = _localExportResults
-
-    private val _importsVersion = MutableStateFlow(0)
-    /** Bumped whenever the local import folders change (export with auto-clear, clear imports). */
-    val importsVersion: StateFlow<Int> = _importsVersion.asStateFlow()
-
-    /**
-     * Copies [folders] to the SAF tree [treeUri]. Runs in viewModelScope so rotating or leaving the
-     * screen doesn't cut a multi-GB copy short.
-     */
-    fun exportToLocalFolder(folders: List<java.io.File>, treeUri: Uri) {
-        if (_localExport.value != null) return
-        _localExport.value = ExportProgress(0, 0, null)
-        viewModelScope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    val root = DocumentFile.fromTreeUri(appContext, treeUri)?.takeIf { it.canWrite() }
-                        ?: return@withContext null
-                    LocalFolderExporter().export(
-                        folders = folders,
-                        root = DocumentFileExportDirectory(appContext.contentResolver, root),
-                        clearSources = autoClearImports.value,
-                        onProgress = { _localExport.value = it },
-                    )
-                }
-                if (result?.clearedFolders?.isNotEmpty() == true) _importsVersion.update { it + 1 }
-                _localExportResults.tryEmit(result)
-            } finally {
-                _localExport.value = null
-            }
-        }
-    }
 
     private val _state = MutableStateFlow<TransferState>(TransferState.Idle)
     val state: StateFlow<TransferState> = _state.asStateFlow()
@@ -278,16 +190,6 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun clearPreviousImports(onComplete: () -> Unit = {}) {
-        viewModelScope.launch {
-            transferRepository.clearPreviousImports()
-            _importsVersion.update { it + 1 }
-            withContext(Dispatchers.Main) {
-                onComplete()
-            }
-        }
-    }
-
     private var thumbnailJob: Job? = null
 
     private fun loadThumbnails(files: List<CameraFile>) {
@@ -315,7 +217,7 @@ class MainViewModel @Inject constructor(
     }
 
     /**
-     * Star ratings sit in the RAW header (XMP / Exif 0x4746), so each needs its own 64 KB read. They run
+     * Star ratings sit in the RAW header (XMP / Exif 0x4746), so each needs its own header read. They run
      * one at a time after the thumbnails rather than in parallel with them: MTP serialises requests
      * anyway, and a burst of hundreds of reads only delays the thumbnails. Stops once the picker is
      * left (e.g. a transfer started) so it never competes with the transfer.
@@ -579,9 +481,9 @@ class MainViewModel @Inject constructor(
         // — the preview itself is fetched afterwards by the offset they give.
         private const val CR2_HEAD_READ_BYTES = 64 * 1024
 
-        // A CR3 keeps its XMP packet (with xmp:Rating) after the moov box: ~24–37 KB in on an R7,
-        // but ~66 KB on an R8, whose embedded THMB is bigger. 64 KB missed those. A CR2 has its
-        // IFD0 Rating tag right at the start.
+        // A CR3 keeps its XMP packet (with xmp:Rating) after the moov box, so its offset follows
+        // the size of the embedded THMB: 18–30 KB on an RP, 27–39 KB on an R50, 51–67 KB on an R8
+        // (measured) — 64 KB missed some R8 shots. A CR2 has its IFD0 Rating tag at the start.
         private const val RATING_HEAD_READ_BYTES = 128 * 1024
     }
 }

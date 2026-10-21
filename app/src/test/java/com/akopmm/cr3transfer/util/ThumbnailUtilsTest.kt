@@ -276,7 +276,7 @@ class ThumbnailUtilsTest {
         assertNull(ThumbnailUtils.extractRating(ByteArray(0)))
     }
 
-    /** The XMP packet exactly as an EOS R7 / R8 writes it into the CR3 header. */
+    /** The XMP packet exactly as an EOS R8 / R50 / RP writes it into the CR3 header. */
     private fun canonXmp(rating: Int): ByteArray =
         ("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">" +
             "<rdf:Description rdf:about=\"\" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\">" +

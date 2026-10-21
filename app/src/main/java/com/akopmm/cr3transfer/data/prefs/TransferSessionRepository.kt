@@ -55,10 +55,4 @@ class TransferSessionRepository @Inject constructor(
             emptyList()
         }
     }
-
-    suspend fun clearSessions() = withContext(Dispatchers.IO) {
-        if (file.exists()) {
-            file.delete()
-        }
-    }
 }

@@ -32,12 +32,10 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -55,9 +53,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import android.content.Context
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
@@ -67,7 +62,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -86,9 +80,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.akopmm.cr3transfer.R
-import com.akopmm.cr3transfer.data.export.ExportProgress
-import com.akopmm.cr3transfer.data.export.ExportResult
-import com.akopmm.cr3transfer.data.prefs.DefaultFolderInfo
 import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileType
 import com.akopmm.cr3transfer.domain.model.TransferState
@@ -111,46 +102,12 @@ fun MainScreen(
     val hdrHandles by viewModel.hdrHandles.collectAsState()
     val showHistory by viewModel.showHistory.collectAsState()
     val sessionHistory by viewModel.sessionHistory.collectAsState()
-    val defaultFolder by viewModel.defaultFolder.collectAsState()
-    val autoClearImports by viewModel.autoClearImports.collectAsState()
-    val rememberCameraNicknames by viewModel.rememberCameraNicknames.collectAsState()
-    val localExport by viewModel.localExport.collectAsState()
-    val importsVersion by viewModel.importsVersion.collectAsState()
-    var showSettings by remember { mutableStateOf(false) }
-
-    val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        viewModel.localExportResults.collect { result ->
-            Toast.makeText(context, localExportMessage(result), Toast.LENGTH_LONG).show()
-        }
-    }
-    localExport?.let { LocalExportProgressDialog(it) }
-    val settingsFolderPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree(),
-    ) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                )
-            } catch (e: Exception) {
-                android.util.Log.w("CR3Transfer", "Failed to take persistable URI permission: ${e.message}")
-            }
-            val displayName = DocumentFile.fromTreeUri(context, uri)?.name ?: uri.lastPathSegment ?: "Local Folder"
-            viewModel.saveDefaultFolder(uri.toString(), displayName)
-            Toast.makeText(context, "Default local folder set to $displayName", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
                 actions = {
-                    IconButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
                     IconButton(onClick = { viewModel.openHistory() }) {
                         Icon(Icons.Filled.List, contentDescription = "Transfer History")
                     }
@@ -164,19 +121,7 @@ fun MainScreen(
                 .padding(padding),
         ) {
             when (val currentState = state) {
-                is TransferState.Idle -> IdleContent(
-                    defaultFolder = defaultFolder,
-                    autoClearImports = autoClearImports,
-                    onSaveDefaultFolder = { uri, name -> viewModel.saveDefaultFolder(uri, name) },
-                    onClearDefaultFolder = { viewModel.clearDefaultFolder() },
-                    importsVersion = importsVersion,
-                    onExportToLocal = { folders, uri -> viewModel.exportToLocalFolder(folders, uri) },
-                    onClearPreviousImports = {
-                        viewModel.clearPreviousImports {
-                            Toast.makeText(context, "Previous imports cleared", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                )
+                is TransferState.Idle -> IdleContent()
                 is TransferState.CameraConnected -> CameraConnectedContent(
                     cameraName = currentState.cameraName,
                     onSaveCameraName = { viewModel.saveCameraName(it) },
@@ -198,20 +143,7 @@ fun MainScreen(
                     },
                 )
                 is TransferState.Transferring -> TransferringContent(currentState)
-                is TransferState.Done -> DoneContent(
-                    state = currentState,
-                    defaultFolder = defaultFolder,
-                    autoClearImports = autoClearImports,
-                    onSaveDefaultFolder = { uri, name -> viewModel.saveDefaultFolder(uri, name) },
-                    onClearDefaultFolder = { viewModel.clearDefaultFolder() },
-                    importsVersion = importsVersion,
-                    onExportToLocal = { folders, uri -> viewModel.exportToLocalFolder(folders, uri) },
-                    onClearPreviousImports = {
-                        viewModel.clearPreviousImports {
-                            Toast.makeText(context, "Previous imports cleared", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                )
+                is TransferState.Done -> DoneContent(currentState)
                 is TransferState.Error -> ErrorContent(currentState)
             }
         }
@@ -224,40 +156,16 @@ fun MainScreen(
                 TransferHistorySheet(sessions = sessionHistory)
             }
         }
-
-        if (showSettings) {
-            SettingsDialog(
-                defaultFolder = defaultFolder,
-                autoClearImports = autoClearImports,
-                rememberCameraNicknames = rememberCameraNicknames,
-                onSetDefaultFolder = { settingsFolderPickerLauncher.launch(null) },
-                onClearDefaultFolder = { viewModel.clearDefaultFolder() },
-                onSetAutoClearImports = { viewModel.setAutoClearImports(it) },
-                onSetRememberCameraNicknames = { viewModel.setRememberCameraNicknames(it) },
-                onClearPreviousImports = {
-                    viewModel.clearPreviousImports {
-                        Toast.makeText(context, "Previous imports cleared", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onDismiss = { showSettings = false },
-            )
-        }
     }
 }
 
 @Composable
-private fun IdleContent(
-    defaultFolder: DefaultFolderInfo?,
-    autoClearImports: Boolean = false,
-    onSaveDefaultFolder: (String, String) -> Unit,
-    onClearDefaultFolder: () -> Unit,
-    importsVersion: Int,
-    onExportToLocal: (List<java.io.File>, Uri) -> Unit,
-    onClearPreviousImports: () -> Unit,
-) {
+private fun IdleContent() {
+    val context = LocalContext.current
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
+    var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
 
-    LaunchedEffect(importsVersion) {
+    LaunchedEffect(Unit) {
         importFolders = withContext(Dispatchers.IO) { findImportFolders() }
     }
 
@@ -283,20 +191,28 @@ private fun IdleContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                ExportSection(
-                    importFolders = importFolders,
-                    defaultFolder = defaultFolder,
-                    autoClearImports = autoClearImports,
-                    onSaveDefaultFolder = onSaveDefaultFolder,
-                    onClearDefaultFolder = onClearDefaultFolder,
-                    onExportToLocal = onExportToLocal,
-                    onClearPreviousImports = {
-                        onClearPreviousImports()
-                        importFolders = emptyList()
-                    },
-                )
+                Button(onClick = { pickerTarget = ShareTarget.LIGHTROOM }) {
+                    Text("Import to Lightroom")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { pickerTarget = ShareTarget.IMMICH }) {
+                    Text("Send to Immich")
+                }
             }
         }
+    }
+
+    pickerTarget?.let { target ->
+        FolderPickerDialog(
+            folders = importFolders,
+            title = target.pickerTitle,
+            confirmLabel = target.confirmLabel,
+            onDismiss = { pickerTarget = null },
+            onConfirm = { selected ->
+                pickerTarget = null
+                launchCr3Share(context, selected, target)
+            },
+        )
     }
 }
 
@@ -783,19 +699,12 @@ private fun TransferringContent(state: TransferState.Transferring) {
 }
 
 @Composable
-private fun DoneContent(
-    state: TransferState.Done,
-    defaultFolder: DefaultFolderInfo?,
-    autoClearImports: Boolean = false,
-    onSaveDefaultFolder: (String, String) -> Unit,
-    onClearDefaultFolder: () -> Unit,
-    importsVersion: Int,
-    onExportToLocal: (List<java.io.File>, Uri) -> Unit,
-    onClearPreviousImports: () -> Unit,
-) {
+private fun DoneContent(state: TransferState.Done) {
+    val context = LocalContext.current
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
+    var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
 
-    LaunchedEffect(importsVersion) {
+    LaunchedEffect(Unit) {
         importFolders = withContext(Dispatchers.IO) { findImportFolders() }
     }
 
@@ -813,115 +722,22 @@ private fun DoneContent(
                 Text("${state.failed} files failed", color = MaterialTheme.colorScheme.error)
             }
             Spacer(modifier = Modifier.height(16.dp))
-            ExportSection(
-                importFolders = importFolders,
-                defaultFolder = defaultFolder,
-                autoClearImports = autoClearImports,
-                onSaveDefaultFolder = onSaveDefaultFolder,
-                onClearDefaultFolder = onClearDefaultFolder,
-                onExportToLocal = onExportToLocal,
-                onClearPreviousImports = {
-                    onClearPreviousImports()
-                    importFolders = emptyList()
-                },
-                showOpenFolderButton = true,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ExportSection(
-    importFolders: List<java.io.File>,
-    defaultFolder: DefaultFolderInfo?,
-    autoClearImports: Boolean = false,
-    onSaveDefaultFolder: (String, String) -> Unit,
-    onClearDefaultFolder: () -> Unit,
-    onExportToLocal: (List<java.io.File>, Uri) -> Unit,
-    onClearPreviousImports: () -> Unit,
-    showOpenFolderButton: Boolean = false,
-) {
-    val context = LocalContext.current
-    var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
-    var pendingLocalFolders by remember { mutableStateOf<List<java.io.File>?>(null) }
-    var showClearConfirm by remember { mutableStateOf(false) }
-
-    if (showClearConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirm = false },
-            title = { Text("Clear Previous Imports?") },
-            text = {
-                Text(CLEAR_IMPORTS_WARNING)
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showClearConfirm = false
-                        onClearPreviousImports()
-                    },
-                ) { Text("Clear Imports", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
-            },
-        )
-    }
-
-    val folderPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree(),
-    ) { uri ->
-        val folders = pendingLocalFolders
-        pendingLocalFolders = null
-        if (uri != null && folders != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                )
-            } catch (e: Exception) {
-                android.util.Log.w("CR3Transfer", "Failed to take persistable URI permission: ${e.message}")
+            Button(
+                onClick = { pickerTarget = ShareTarget.LIGHTROOM },
+                enabled = importFolders.isNotEmpty(),
+            ) {
+                Text("Import to Lightroom")
             }
-            val displayName = DocumentFile.fromTreeUri(context, uri)?.name ?: uri.lastPathSegment ?: "Local Folder"
-            onSaveDefaultFolder(uri.toString(), displayName)
-
-            onExportToLocal(folders, uri)
-        }
-    }
-
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Button(
-            onClick = { pickerTarget = ShareTarget.LIGHTROOM },
-            enabled = importFolders.isNotEmpty(),
-        ) {
-            Text("Import to Lightroom")
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { pickerTarget = ShareTarget.IMMICH },
-            enabled = importFolders.isNotEmpty(),
-        ) {
-            Text("Send to Immich")
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { pickerTarget = ShareTarget.LOCAL_FOLDER },
-            enabled = importFolders.isNotEmpty(),
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Transfer to Local Folder")
-                if (defaultFolder != null) {
-                    Text(
-                        text = "Default: ${defaultFolder.fullPath}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
-                    )
-                }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { pickerTarget = ShareTarget.IMMICH },
+                enabled = importFolders.isNotEmpty(),
+            ) {
+                Text("Send to Immich")
             }
-        }
-        if (showOpenFolderButton) {
             Spacer(modifier = Modifier.height(8.dp))
             Button(onClick = {
-                val uri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADCIM%2FCanonImports")
+                val uri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADCIM%2FCanonImports")
                 val intent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, "vnd.android.document/directory")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -931,7 +747,7 @@ private fun ExportSection(
                 } catch (_: Exception) {
                     try {
                         val fallback = Intent(Intent.ACTION_VIEW).apply {
-                            data = Uri.parse("content://com.android.externalstorage.documents/root/primary")
+                            data = android.net.Uri.parse("content://com.android.externalstorage.documents/root/primary")
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK
                         }
                         context.startActivity(fallback)
@@ -941,50 +757,17 @@ private fun ExportSection(
                 Text(stringResource(R.string.open_folder))
             }
         }
-        if (importFolders.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            TextButton(onClick = { showClearConfirm = true }) {
-                Text("Clear Previous Imports", color = MaterialTheme.colorScheme.error)
-            }
-        }
     }
 
     pickerTarget?.let { target ->
-        val isLocalAndDefaultSet = target == ShareTarget.LOCAL_FOLDER && defaultFolder != null
         FolderPickerDialog(
             folders = importFolders,
             title = target.pickerTitle,
-            confirmLabel = if (defaultFolder != null && target == ShareTarget.LOCAL_FOLDER) "Transfer to ${defaultFolder.fullPath}" else target.confirmLabel,
-            secondaryButtonLabel = if (isLocalAndDefaultSet) "Choose different folder" else null,
-            onSecondaryClick = if (isLocalAndDefaultSet) {
-                { selected ->
-                    pickerTarget = null
-                    pendingLocalFolders = selected
-                    folderPickerLauncher.launch(null)
-                }
-            } else null,
+            confirmLabel = target.confirmLabel,
             onDismiss = { pickerTarget = null },
             onConfirm = { selected ->
                 pickerTarget = null
-                if (target == ShareTarget.LOCAL_FOLDER) {
-                    if (defaultFolder != null) {
-                        val uri = defaultFolder.uri
-                        val doc = DocumentFile.fromTreeUri(context, uri)
-                        if (doc != null && doc.canWrite()) {
-                            onExportToLocal(selected, uri)
-                        } else {
-                            Toast.makeText(context, "Default folder inaccessible. Please select a new folder.", Toast.LENGTH_SHORT).show()
-                            onClearDefaultFolder()
-                            pendingLocalFolders = selected
-                            folderPickerLauncher.launch(null)
-                        }
-                    } else {
-                        pendingLocalFolders = selected
-                        folderPickerLauncher.launch(null)
-                    }
-                } else {
-                    launchCr3Share(context, selected, target)
-                }
+                launchCr3Share(context, selected, target)
             },
         )
     }
@@ -1111,9 +894,9 @@ private fun findImportFolders(): List<java.io.File> {
         .toList()
 }
 
-/** Apps or locations a set of imported RAW folders can be handed off to. */
+/** Apps a set of imported RAW folders can be handed off to via the Android share sheet. */
 private enum class ShareTarget(
-    val packageName: String?,
+    val packageName: String,
     val pickerTitle: String,
     val confirmLabel: String,
     val missingAppMessage: String,
@@ -1136,17 +919,9 @@ private enum class ShareTarget(
         confirmLabel = "Upload",
         missingAppMessage = "Immich is not installed",
     ),
-
-    LOCAL_FOLDER(
-        packageName = null,
-        pickerTitle = "Select folders to transfer",
-        confirmLabel = "Choose Folder",
-        missingAppMessage = "Could not open folder picker",
-    ),
 }
 
 private fun launchCr3Share(context: Context, folders: List<java.io.File>, target: ShareTarget) {
-    val targetPackage = target.packageName ?: return
     val rawFiles = folders.flatMap { folder ->
         folder.walkTopDown().filter { it.isRawImport() }.toList()
     }
@@ -1159,7 +934,7 @@ private fun launchCr3Share(context: Context, folders: List<java.io.File>, target
     val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
         type = "image/*"
         putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-        setPackage(targetPackage)
+        setPackage(target.packageName)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     try {
@@ -1179,163 +954,10 @@ private fun launchCr3Share(context: Context, folders: List<java.io.File>, target
 }
 
 @Composable
-private fun SettingsDialog(
-    defaultFolder: DefaultFolderInfo?,
-    autoClearImports: Boolean,
-    rememberCameraNicknames: Boolean,
-    onSetDefaultFolder: () -> Unit,
-    onClearDefaultFolder: () -> Unit,
-    onSetAutoClearImports: (Boolean) -> Unit,
-    onSetRememberCameraNicknames: (Boolean) -> Unit,
-    onClearPreviousImports: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var showClearConfirm by remember { mutableStateOf(false) }
-
-    if (showClearConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirm = false },
-            title = { Text("Clear Previous Imports?") },
-            text = {
-                Text(CLEAR_IMPORTS_WARNING)
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showClearConfirm = false
-                        onDismiss()
-                        onClearPreviousImports()
-                    },
-                ) { Text("Clear Imports", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
-            },
-        )
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Settings") },
-        text = {
-            Column {
-                Text(
-                    text = "Default Local Folder",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = if (defaultFolder != null) defaultFolder.fullPath else "Not set (will prompt on transfer)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (defaultFolder != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    if (defaultFolder != null) {
-                        TextButton(onClick = onClearDefaultFolder) {
-                            Text("Clear Folder")
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    Button(onClick = {
-                        onDismiss()
-                        onSetDefaultFolder()
-                    }) {
-                        Text(if (defaultFolder != null) "Change Folder" else "Set Default Folder")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(
-                            text = "Clear import files after transfer",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Automatically delete local staging files (DCIM/CanonImports) once transfer to local folder is complete",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = autoClearImports,
-                        onCheckedChange = onSetAutoClearImports,
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(
-                            text = "Remember camera nicknames",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Save and reuse custom camera nicknames across connection sessions",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = rememberCameraNicknames,
-                        onCheckedChange = onSetRememberCameraNicknames,
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "Storage & Imports",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = { showClearConfirm = true },
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Clear Previous Imports Now")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
-            }
-        },
-    )
-}
-
-@Composable
 private fun FolderPickerDialog(
     folders: List<java.io.File>,
     title: String,
     confirmLabel: String,
-    secondaryButtonLabel: String? = null,
-    onSecondaryClick: ((List<java.io.File>) -> Unit)? = null,
     onDismiss: () -> Unit,
     onConfirm: (List<java.io.File>) -> Unit,
 ) {
@@ -1378,71 +1000,17 @@ private fun FolderPickerDialog(
             }
         },
         confirmButton = {
-            Row {
-                if (secondaryButtonLabel != null && onSecondaryClick != null) {
-                    TextButton(
-                        onClick = {
-                            onSecondaryClick(folders.filter { it.absolutePath in selected })
-                        },
-                        enabled = selected.isNotEmpty(),
-                    ) { Text(secondaryButtonLabel) }
-                }
-                TextButton(
-                    onClick = {
-                        // FIX: Check absolutePath instead of name
-                        onConfirm(folders.filter { it.absolutePath in selected })
-                    },
-                    enabled = selected.isNotEmpty(),
-                ) { Text(confirmLabel) }
-            }
+            TextButton(
+                onClick = {
+                    // FIX: Check absolutePath instead of name
+                    onConfirm(folders.filter { it.absolutePath in selected })
+                },
+                enabled = selected.isNotEmpty(),
+            ) { Text(confirmLabel) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
-    )
-}
-
-private const val CLEAR_IMPORTS_WARNING =
-    "This permanently deletes every imported photo and video on this phone (DCIM/CanonImports and " +
-        "Movies/CanonImports) — copies already sent to Immich, Lightroom or another folder are not affected. " +
-        "Transfer history is reset too, so the next time the camera is connected every file on the card " +
-        "is offered as new. This cannot be undone."
-
-private fun localExportMessage(result: ExportResult?): String {
-    if (result == null) return "Cannot write to the selected folder"
-    val n = result.verified
-    val copied = "Transferred $n ${if (n == 1) "file" else "files"} to local folder"
-    return when {
-        result.failed.isNotEmpty() ->
-            "$copied, ${result.failed.size} failed — nothing was deleted from folders with failures"
-        result.clearedFolders.isNotEmpty() -> "$copied and cleared the import staging files"
-        else -> copied
-    }
-}
-
-@Composable
-private fun LocalExportProgressDialog(progress: ExportProgress) {
-    AlertDialog(
-        onDismissRequest = {},
-        title = { Text("Copying to local folder") },
-        text = {
-            Column {
-                if (progress.total > 0) {
-                    LinearProgressIndicator(
-                        progress = { progress.done.toFloat() / progress.total },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "${progress.done} / ${progress.total}" + (progress.currentFile?.let { " · $it" } ?: ""),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        },
-        confirmButton = {},
     )
 }
 
