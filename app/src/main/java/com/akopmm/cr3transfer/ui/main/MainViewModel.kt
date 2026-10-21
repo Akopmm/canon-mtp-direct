@@ -134,6 +134,10 @@ class MainViewModel @Inject constructor(
     private val _ratings = MutableStateFlow<Map<Int, Int>>(emptyMap())
     val ratings: StateFlow<Map<Int, Int>> = _ratings.asStateFlow()
 
+    private val _ratingsComplete = MutableStateFlow(false)
+    /** True once every RAW on the card has had its rating read. */
+    val ratingsComplete: StateFlow<Boolean> = _ratingsComplete.asStateFlow()
+
     // Handles of HDR-PQ CR3 shots whose HEVC preview can't be decoded on Android (shown with an
     // "HDR" placeholder). See loadEmbeddedCr3Preview.
     private val _hdrHandles = MutableStateFlow<Set<Int>>(emptySet())
@@ -290,6 +294,7 @@ class MainViewModel @Inject constructor(
         thumbnailJob?.cancel()
         _hdrHandles.value = emptySet()
         _ratings.value = emptyMap()
+        _ratingsComplete.value = false
         thumbnailJob = viewModelScope.launch {
             for (file in files) {
                 try {
@@ -329,6 +334,7 @@ class MainViewModel @Inject constructor(
             }
             if (rating != null) _ratings.update { it + (file.objectHandle to rating) }
         }
+        _ratingsComplete.value = true
     }
 
     /** Returns true if a usable thumbnail was stored from the MTP GetThumb operation. */

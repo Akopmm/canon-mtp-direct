@@ -107,6 +107,7 @@ fun MainScreen(
     val state by viewModel.state.collectAsState()
     val thumbnails by viewModel.thumbnails.collectAsState()
     val ratings by viewModel.ratings.collectAsState()
+    val ratingsComplete by viewModel.ratingsComplete.collectAsState()
     val hdrHandles by viewModel.hdrHandles.collectAsState()
     val showHistory by viewModel.showHistory.collectAsState()
     val sessionHistory by viewModel.sessionHistory.collectAsState()
@@ -185,6 +186,7 @@ fun MainScreen(
                     state = currentState,
                     thumbnails = thumbnails,
                     ratings = ratings,
+                    ratingsComplete = ratingsComplete,
                     hdrHandles = hdrHandles,
                     onToggleFile = { viewModel.toggleFileSelection(it) },
                     onSelectAll = { viewModel.selectHandles(it) },
@@ -390,11 +392,12 @@ private fun FilePickerContent(
     state: TransferState.FilePicker,
     thumbnails: Map<Int, ByteArray>,
     ratings: Map<Int, Int>,
+    ratingsComplete: Boolean,
     hdrHandles: Set<Int>,
     onToggleFile: (Int) -> Unit,
-    onSelectAll: (List<Int>) -> Unit,
+    onSelectAll: (Collection<Int>) -> Unit,
     onSelectNone: (List<Int>) -> Unit,
-    onSelectOnly: (List<Int>, List<Int>) -> Unit,
+    onSelectOnly: (Collection<Int>, Collection<Int>) -> Unit,
     onToggleDeleteMode: () -> Unit,
     onStartTransfer: () -> Unit,
 ) {
@@ -403,6 +406,17 @@ private fun FilePickerContent(
     var sort by remember { mutableStateOf(PickerSort.NEWEST_FIRST) }
     var hiddenTypes by remember { mutableStateOf(emptySet<FileType>()) }
     var starredOnly by remember { mutableStateOf(false) }
+    // Starred handles already selected for the user while the filter is on, so ratings that arrive
+    // later are added once without re-selecting shots the user deliberately unticked.
+    var autoSelectedStarred by remember { mutableStateOf(emptySet<Int>()) }
+    LaunchedEffect(ratings, starredOnly) {
+        if (!starredOnly) return@LaunchedEffect
+        val newlyRated = starredHandles(state.files, ratings, hiddenTypes) - autoSelectedStarred
+        if (newlyRated.isNotEmpty()) {
+            autoSelectedStarred = autoSelectedStarred + newlyRated
+            onSelectAll(newlyRated)
+        }
+    }
     var infoFile by remember { mutableStateOf<Pair<CameraFile, Int?>?>(null) }
 
     // Only offer filtering for the types this camera actually gave us.
@@ -462,15 +476,6 @@ private fun FilePickerContent(
             )
             Row {
                 TextButton(onClick = { onSelectAll(visibleHandles) }) { Text("All") }
-                TextButton(onClick = {
-                    val starredHandles = visibleFiles
-                        .filter { (ratings[it.objectHandle] ?: 0) > 0 }
-                        .map { it.objectHandle }
-                    if (starredHandles.isEmpty()) {
-                        Toast.makeText(context, "No starred files found", Toast.LENGTH_SHORT).show()
-                    }
-                    onSelectOnly(visibleHandles, starredHandles)
-                }) { Text("Starred") }
                 TextButton(onClick = { onSelectNone(visibleHandles) }) { Text("None") }
             }
         }
@@ -498,8 +503,20 @@ private fun FilePickerContent(
             Spacer(modifier = Modifier.width(4.dp))
             FilterChip(
                 selected = starredOnly,
-                onClick = { starredOnly = !starredOnly },
-                label = { Text("★ Starred") },
+                onClick = {
+                    starredOnly = !starredOnly
+                    if (starredOnly) {
+                        // "Starred" means "import my picks": select exactly the starred shots, so
+                        // unstarred files hidden by the filter don't silently transfer as well.
+                        val starred = starredHandles(state.files, ratings, hiddenTypes)
+                        autoSelectedStarred = starred
+                        if (starred.isEmpty() && ratingsComplete) {
+                            Toast.makeText(context, "No starred files on the card", Toast.LENGTH_SHORT).show()
+                        }
+                        onSelectOnly(state.files.map { it.objectHandle }, starred)
+                    }
+                },
+                label = { Text(if (ratingsComplete) "★ Starred" else "★ Starred…") },
                 modifier = Modifier.padding(end = 4.dp),
             )
             if (availableTypes.size > 1) {
@@ -1428,3 +1445,10 @@ private fun LocalExportProgressDialog(progress: ExportProgress) {
         confirmButton = {},
     )
 }
+
+/** Handles of starred (1–5 ★) files whose type isn't filtered out. */
+private fun starredHandles(files: List<CameraFile>, ratings: Map<Int, Int>, hiddenTypes: Set<FileType>): Set<Int> =
+    files.asSequence()
+        .filter { it.fileType !in hiddenTypes && (ratings[it.objectHandle] ?: 0) > 0 }
+        .map { it.objectHandle }
+        .toSet()
