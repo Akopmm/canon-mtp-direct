@@ -1,5 +1,6 @@
 package com.akopmm.cr3transfer.ui.main
 
+import com.akopmm.cr3transfer.domain.imports.ImportLocation
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.Box
@@ -17,8 +18,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -28,13 +27,17 @@ import com.akopmm.cr3transfer.R
 
 // Home screen (no camera connected): connect prompt plus hand-off of earlier imports.
 @Composable
-internal fun IdleContent() {
+internal fun IdleContent(
+    importLocation: ImportLocation,
+    onEditImportLocation: () -> Unit,
+    loadImportFolders: suspend () -> List<java.io.File>,
+) {
     val context = LocalContext.current
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
     var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
 
-    LaunchedEffect(Unit) {
-        importFolders = withContext(Dispatchers.IO) { findImportFolders() }
+    LaunchedEffect(importLocation) {
+        importFolders = loadImportFolders()
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -49,6 +52,8 @@ internal fun IdleContent() {
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            ImportLocationRow(location = importLocation, onEdit = onEditImportLocation)
             if (importFolders.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(24.dp))
                 HorizontalDivider()

@@ -1,9 +1,9 @@
 package com.akopmm.cr3transfer.ui.main
 
+import com.akopmm.cr3transfer.data.imports.ImportFolders.Companion.isRawImport
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import android.content.Intent
-import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
@@ -32,29 +32,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 
 // Imported folders on disk and handing them to Lightroom / Immich.
-/** RAW stills as written to disk: CR3 from Digic 8 and newer bodies, CR2 from the ones before. */
-internal val RAW_EXTENSIONS = listOf(".CR3", ".CR2")
-
-internal fun java.io.File.isRawImport(): Boolean =
-    isFile && RAW_EXTENSIONS.any { name.endsWith(it, ignoreCase = true) }
-
-/** Returns date-named subdirectories of CanonImports that contain at least one RAW file, newest first. */
-internal fun findImportFolders(): List<java.io.File> {
-    val importDir = java.io.File(
-        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
-        "CanonImports",
-    )
-    if (!importDir.exists()) return emptyList()
-
-    return importDir.walkTopDown()
-        .filter { dir ->
-            dir.isDirectory && dir != importDir &&
-                dir.listFiles()?.any { child -> child.isRawImport() } == true
-        }
-        .sortedWith(compareByDescending<java.io.File> { it.name }.thenByDescending { it.parentFile?.name })
-        .toList()
-}
-
 /** Apps a set of imported RAW folders can be handed off to via the Android share sheet. */
 internal enum class ShareTarget(
     val packageName: String,
