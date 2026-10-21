@@ -6,6 +6,8 @@ import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -78,7 +80,7 @@ class ImportFoldersTest {
     // ---- dedup ---------------------------------------------------------------------------------
 
     @Test
-    fun importedNamesSpanOldAndNewRootsForThisCamera() {
+    fun importedFilesSpanOldAndNewRootsForThisCamera() {
         put("DCIM/CanonImports/R8/2026-10-01/OLD.CR3")
         put("Photography/Raw/R8/2026-10-20/NEW.CR3")
         put("Movies/CanonImports/R8/2026-10-01/CLIP.MP4")
@@ -87,37 +89,49 @@ class ImportFoldersTest {
             video = setOf("Movies/CanonImports", "Photography/Raw"),
         )
 
-        val names = folders.importedNames(roots, "R8")
+        val files = folders.importedFiles(roots, "R8")
 
-        assertTrue(names.contains("OLD.CR3", FileType.CR3))
-        assertTrue(names.contains("NEW.CR3", FileType.CR3))
-        assertTrue(names.contains("CLIP.MP4", FileType.MP4))
-        assertFalse(names.contains("CLIP.MP4", FileType.CR3))
+        assertEquals(setOf(1L), files.sizesOf("OLD.CR3", FileType.CR3))
+        assertEquals(setOf(1L), files.sizesOf("NEW.CR3", FileType.CR3))
+        assertEquals(setOf(1L), files.sizesOf("CLIP.MP4", FileType.MP4))
+        assertNull(files.sizesOf("CLIP.MP4", FileType.CR3))
     }
 
     @Test
-    fun importedNamesAreScopedToTheCamera() {
+    fun importedFilesKeepEverySizeOfAName() {
+        // Canon's counter wrapped: two different IMG_0001.CR3 on disk.
+        File(storage, "DCIM/CanonImports/R8/2026-01-01").mkdirs()
+        File(storage, "DCIM/CanonImports/R8/2026-01-01/IMG_0001.CR3").writeBytes(ByteArray(10))
+        File(storage, "DCIM/CanonImports/R8/2026-10-01").mkdirs()
+        File(storage, "DCIM/CanonImports/R8/2026-10-01/IMG_0001.CR3").writeBytes(ByteArray(20))
+
+        val files = folders.importedFiles(KnownRoots(setOf("DCIM/CanonImports"), setOf("Movies/CanonImports")), "R8")
+
+        assertEquals(setOf(10L, 20L), files.sizesOf("IMG_0001.CR3", FileType.CR3))
+    }
+
+    @Test
+    fun importedFilesAreScopedToTheCamera() {
         put("DCIM/CanonImports/R50/2026-10-01/IMG_0001.CR3")
         val roots = KnownRoots(setOf("DCIM/CanonImports"), setOf("Movies/CanonImports"))
 
-        assertFalse(folders.importedNames(roots, "R8").contains("IMG_0001.CR3", FileType.CR3))
-        assertTrue(folders.importedNames(roots, "R50").contains("IMG_0001.CR3", FileType.CR3))
+        assertNull(folders.importedFiles(roots, "R8").sizesOf("IMG_0001.CR3", FileType.CR3))
+        assertNotNull(folders.importedFiles(roots, "R50").sizesOf("IMG_0001.CR3", FileType.CR3))
     }
 
     @Test
-    fun importedNamesIncludeTheAppStorageFallback() {
+    fun importedFilesIncludeTheAppStorageFallback() {
         File(appFiles, "CanonImports/photos/R8/2026-10-01").mkdirs()
         File(appFiles, "CanonImports/photos/R8/2026-10-01/FB.CR3").writeText("x")
         val roots = KnownRoots(setOf("DCIM/CanonImports"), setOf("Movies/CanonImports"))
 
-        assertTrue(folders.importedNames(roots, "R8").contains("FB.CR3", FileType.CR3))
+        assertNotNull(folders.importedFiles(roots, "R8").sizesOf("FB.CR3", FileType.CR3))
     }
 
     @Test
     fun missingRootsAreFine() {
         val roots = KnownRoots(setOf("Nowhere/At/All"), setOf("Also/Missing"))
-        val names = folders.importedNames(roots, "R8")
-        assertTrue(names.photoNames.isEmpty() && names.videoNames.isEmpty())
+        assertEquals(emptyList<Any>(), folders.importedFiles(roots, "R8").entries())
     }
 
     // ---- folders to hand off -------------------------------------------------------------------

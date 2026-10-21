@@ -1,20 +1,12 @@
 package com.akopmm.cr3transfer.data.imports
 
 import com.akopmm.cr3transfer.domain.imports.ImportLocation
+import com.akopmm.cr3transfer.domain.imports.ImportedFiles
 import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileType
 import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
-
-/** Already-imported file names, split by kind so a photo and a video can share a name. */
-data class ImportedNamesCache(
-    val photoNames: Set<String>,
-    val videoNames: Set<String>,
-) {
-    fun contains(fileName: String, fileType: FileType): Boolean =
-        if (fileType.isVideo) fileName in videoNames else fileName in photoNames
-}
 
 /** Every import root ever used, so changing the folder never makes old imports look new. */
 data class KnownRoots(val photo: Set<String>, val video: Set<String>)
@@ -43,20 +35,22 @@ class ImportFolders(
     }
 
     /**
-     * Names already imported from [camera], across every known root and the fallback dir. Scoped to
-     * the camera's folder (when it has one) so two bodies that both shoot IMG_0001.CR3 don't
-     * shadow each other.
+     * Files already imported from [camera], across every known root and the fallback dir, with their
+     * sizes. Scoped to the camera's folder (when it has one) so two bodies that both shoot
+     * IMG_0001.CR3 don't shadow each other.
      */
-    fun importedNames(roots: KnownRoots, camera: String?): ImportedNamesCache {
-        fun names(rootDirs: List<File>): Set<String> = rootDirs
+    fun importedFiles(roots: KnownRoots, camera: String?): ImportedFiles {
+        fun index(rootDirs: List<File>): Map<String, Set<Long>> = rootDirs
             .map { if (camera.isNullOrBlank()) it else File(it, camera) }
             .distinct()
             .filter { it.isDirectory }
-            .flatMapTo(HashSet()) { dir -> dir.walkTopDown().filter { it.isFile }.map { it.name } }
+            .flatMap { dir -> dir.walkTopDown().filter { it.isFile && !it.name.startsWith(".") } }
+            .groupBy({ it.name }, { it.length() })
+            .mapValues { it.value.toSet() }
 
-        return ImportedNamesCache(
-            photoNames = names(roots.photo.map { File(storageRoot, it) } + fallbackDir(FileType.CR3)),
-            videoNames = names(roots.video.map { File(storageRoot, it) } + fallbackDir(FileType.MP4)),
+        return ImportedFiles(
+            photos = index(roots.photo.map { File(storageRoot, it) } + fallbackDir(FileType.CR3)),
+            videos = index(roots.video.map { File(storageRoot, it) } + fallbackDir(FileType.MP4)),
         )
     }
 

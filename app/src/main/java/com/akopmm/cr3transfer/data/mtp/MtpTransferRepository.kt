@@ -5,6 +5,7 @@ import android.media.MediaScannerConnection
 import android.mtp.MtpDevice
 import android.util.Log
 import com.akopmm.cr3transfer.data.imports.ImportStore
+import com.akopmm.cr3transfer.domain.imports.DedupPolicy
 import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileStatus
 import com.akopmm.cr3transfer.domain.model.FileTransferStatus
@@ -42,8 +43,8 @@ class MtpTransferRepository @Inject constructor(
         val importDay = LocalDate.now()
         Log.d(TAG, "Starting transfer on $importDay")
 
-        // Build the dedup cache once instead of walking the filesystem per file
-        val importedCache = importStore.importedNames()
+        // Build the dedup snapshot once instead of walking the filesystem per file
+        val dedup = importStore.dedup()
 
         val statuses = files.map { file ->
             FileTransferStatus(
@@ -57,8 +58,9 @@ class MtpTransferRepository @Inject constructor(
 
         for ((index, file) in files.withIndex()) {
             val destDir = importStore.destDirFor(file, importDay)
-            val destFile = File(destDir, file.name)
-            val alreadyTransferred = importedCache.contains(file.name, file.fileType)
+            // Never overwrite: a different file with this name (Canon's counter wrapped) gets a suffix.
+            val destFile = File(destDir, DedupPolicy.freeName(file.name) { File(destDir, it).exists() })
+            val alreadyTransferred = dedup.isOnDisk(file)
             Log.d(TAG, "File ${file.name}: alreadyImported=$alreadyTransferred")
 
             if (alreadyTransferred) {
@@ -110,6 +112,7 @@ class MtpTransferRepository @Inject constructor(
             }
 
             if (success) {
+                importStore.recordImported(file)
                 statuses[index] = statuses[index].copy(status = FileStatus.DONE)
                 Log.d(TAG, "Successfully transferred ${file.name} (${destFile.length()} bytes)")
                 if (deleteAfterTransfer) {

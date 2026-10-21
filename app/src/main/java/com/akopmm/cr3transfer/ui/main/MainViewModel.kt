@@ -175,9 +175,9 @@ class MainViewModel @Inject constructor(
                     return@launch
                 }
                 val newHandles = withContext(Dispatchers.IO) {
-                    val cache = importStore.importedNames()
+                    val dedup = importStore.dedup()
                     scannedFiles
-                        .filter { !cache.contains(it.name, it.fileType) }
+                        .filter { !dedup.wasImported(it) }
                         .map { it.objectHandle }
                         .toSet()
                 }
