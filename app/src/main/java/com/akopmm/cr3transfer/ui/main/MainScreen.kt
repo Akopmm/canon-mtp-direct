@@ -57,6 +57,8 @@ fun MainScreen(
     val hdrHandles by viewModel.hdrHandles.collectAsState()
     val showHistory by viewModel.showHistory.collectAsState()
     val sessionHistory by viewModel.sessionHistory.collectAsState()
+    val importLocation by viewModel.importLocation.collectAsState()
+    var showLocationDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -76,7 +78,11 @@ fun MainScreen(
                 .padding(padding),
         ) {
             when (val currentState = state) {
-                is TransferState.Idle -> IdleContent()
+                is TransferState.Idle -> IdleContent(
+                    importLocation = importLocation,
+                    onEditImportLocation = { showLocationDialog = true },
+                    loadImportFolders = viewModel::importFolders,
+                )
                 is TransferState.CameraConnected -> CameraConnectedContent(
                     cameraName = currentState.cameraName,
                     onSaveCameraName = { viewModel.saveCameraName(it) },
@@ -93,14 +99,31 @@ fun MainScreen(
                     onSelectNone = { viewModel.deselectHandles(it) },
                     onSelectOnly = { visible, target -> viewModel.selectOnly(visible, target) },
                     onToggleDeleteMode = { viewModel.toggleDeleteAfterTransfer() },
+                    importLocation = importLocation,
+                    onEditImportLocation = { showLocationDialog = true },
                     onStartTransfer = {
                         if (viewModel.checkStorageAndProceed()) onStartTransfer()
                     },
                 )
                 is TransferState.Transferring -> TransferringContent(currentState)
-                is TransferState.Done -> DoneContent(currentState)
+                is TransferState.Done -> DoneContent(
+                    state = currentState,
+                    importLocation = importLocation,
+                    loadImportFolders = viewModel::importFolders,
+                )
                 is TransferState.Error -> ErrorContent(currentState)
             }
+        }
+
+        if (showLocationDialog) {
+            ImportLocationDialog(
+                current = importLocation,
+                onSave = {
+                    viewModel.setImportLocation(it)
+                    showLocationDialog = false
+                },
+                onDismiss = { showLocationDialog = false },
+            )
         }
 
         if (showHistory) {

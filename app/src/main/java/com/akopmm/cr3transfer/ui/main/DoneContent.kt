@@ -1,5 +1,6 @@
 package com.akopmm.cr3transfer.ui.main
 
+import com.akopmm.cr3transfer.domain.imports.ImportLocation
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import android.content.Intent
@@ -17,8 +18,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -29,13 +28,17 @@ import com.akopmm.cr3transfer.domain.model.TransferState
 
 // Transfer summary and hand-off of the imported folders.
 @Composable
-internal fun DoneContent(state: TransferState.Done) {
+internal fun DoneContent(
+    state: TransferState.Done,
+    importLocation: ImportLocation,
+    loadImportFolders: suspend () -> List<java.io.File>,
+) {
     val context = LocalContext.current
     var importFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
     var pickerTarget by remember { mutableStateOf<ShareTarget?>(null) }
 
     LaunchedEffect(Unit) {
-        importFolders = withContext(Dispatchers.IO) { findImportFolders() }
+        importFolders = loadImportFolders()
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -67,7 +70,10 @@ internal fun DoneContent(state: TransferState.Done) {
             }
             Spacer(modifier = Modifier.height(8.dp))
             Button(onClick = {
-                val uri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADCIM%2FCanonImports")
+                val uri = android.net.Uri.parse(
+                    "content://com.android.externalstorage.documents/document/primary%3A" +
+                        android.net.Uri.encode(importLocation.photoRoot),
+                )
                 val intent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, "vnd.android.document/directory")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK

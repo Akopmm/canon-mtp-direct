@@ -1,5 +1,6 @@
 package com.akopmm.cr3transfer.ui.main
 
+import com.akopmm.cr3transfer.domain.imports.ImportLocation
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import android.graphics.BitmapFactory
@@ -104,6 +105,8 @@ internal fun FilePickerContent(
     onSelectNone: (List<Int>) -> Unit,
     onSelectOnly: (Collection<Int>, Collection<Int>) -> Unit,
     onToggleDeleteMode: () -> Unit,
+    importLocation: ImportLocation,
+    onEditImportLocation: () -> Unit,
     onStartTransfer: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -291,6 +294,8 @@ internal fun FilePickerContent(
             }
         }
 
+        ImportLocationRow(location = importLocation, onEdit = onEditImportLocation)
+
         // Transfer button
         Button(
             onClick = {
@@ -298,7 +303,7 @@ internal fun FilePickerContent(
                 else onStartTransfer()
             },
             enabled = selectedCount > 0,
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
         ) {
             Text("Transfer $selectedCount ${if (selectedCount == 1) "file" else "files"}")
         }

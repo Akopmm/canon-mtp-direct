@@ -7,9 +7,10 @@ import android.os.StatFs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.akopmm.cr3transfer.data.mtp.MtpDeviceManager
-import com.akopmm.cr3transfer.data.mtp.MtpTransferRepository
+import com.akopmm.cr3transfer.data.imports.ImportStore
 import com.akopmm.cr3transfer.data.prefs.CameraNameRepository
 import com.akopmm.cr3transfer.data.prefs.TransferSessionRepository
+import com.akopmm.cr3transfer.domain.imports.ImportLocation
 import com.akopmm.cr3transfer.domain.model.CameraFile
 import com.akopmm.cr3transfer.domain.model.FileType
 import com.akopmm.cr3transfer.domain.model.TransferSession
@@ -20,8 +21,10 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,7 +35,7 @@ import javax.inject.Inject
 class MainViewModel @Inject constructor(
     private val deviceManager: MtpDeviceManager,
     private val scanCameraUseCase: ScanCameraUseCase,
-    private val transferRepository: MtpTransferRepository,
+    private val importStore: ImportStore,
     private val cameraNameRepository: CameraNameRepository,
     private val sessionRepository: TransferSessionRepository,
 ) : ViewModel() {
@@ -42,6 +45,17 @@ class MainViewModel @Inject constructor(
 
     private val _thumbnails = MutableStateFlow<Map<Int, ByteArray>>(emptyMap())
     val thumbnails: StateFlow<Map<Int, ByteArray>> = _thumbnails.asStateFlow()
+
+    /** Where imports go; shown on the home screen and in the picker. */
+    val importLocation: StateFlow<ImportLocation> = importStore.location
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ImportLocation.DEFAULT)
+
+    fun setImportLocation(location: ImportLocation) {
+        viewModelScope.launch { importStore.setLocation(location) }
+    }
+
+    /** Previously imported folders that can be handed to Lightroom / Immich, newest first. */
+    suspend fun importFolders(): List<java.io.File> = importStore.importFolders()
 
     private val _ratings = MutableStateFlow<Map<Int, Int>>(emptyMap())
     val ratings: StateFlow<Map<Int, Int>> = _ratings.asStateFlow()
@@ -161,7 +175,7 @@ class MainViewModel @Inject constructor(
                     return@launch
                 }
                 val newHandles = withContext(Dispatchers.IO) {
-                    val cache = transferRepository.buildImportedNamesCache()
+                    val cache = importStore.importedNames()
                     scannedFiles
                         .filter { !cache.contains(it.name, it.fileType) }
                         .map { it.objectHandle }
