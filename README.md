@@ -32,6 +32,8 @@ This app talks to the camera **directly over MTP**, so it never touches that pic
 | 📷 **Direct USB-C transfer** | Plug the camera into the phone. No cables to a computer, no Wi-Fi, no cloud. |
 | ♾️ **No file limit** | Reads the card over MTP, so Android's 99-file picker cap doesn't apply. |
 | 🗂️ **Sort & filter the picker** | Order by capture date or name; filter to just the RAWs, or just the JPEGs. |
+| ⭐ **In-camera star ratings** | Stars you set on the camera show on each thumbnail; the ★ Starred filter picks exactly your rated shots. |
+| ℹ️ **File details** | Tap ⓘ on a thumbnail for name, format, size, capture time and rating. |
 | 🖼️ **Real thumbnails** | Embedded previews pulled straight from the RAW files — CR3 and CR2 alike. |
 | 🧩 **Old bodies too** | CR3/MP4 from Digic 8 and newer; CR2/MOV from the DSLRs before them. |
 | 🧠 **Smart dedup** | Skips what you already transferred — per camera, checked against files on disk, survives a reinstall. |

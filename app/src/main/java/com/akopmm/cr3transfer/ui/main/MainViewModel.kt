@@ -18,9 +18,11 @@ import com.akopmm.cr3transfer.domain.usecase.ScanCameraUseCase
 import com.akopmm.cr3transfer.util.ThumbnailUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -40,6 +42,13 @@ class MainViewModel @Inject constructor(
 
     private val _thumbnails = MutableStateFlow<Map<Int, ByteArray>>(emptyMap())
     val thumbnails: StateFlow<Map<Int, ByteArray>> = _thumbnails.asStateFlow()
+
+    private val _ratings = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    val ratings: StateFlow<Map<Int, Int>> = _ratings.asStateFlow()
+
+    private val _ratingsComplete = MutableStateFlow(false)
+    /** True once every RAW on the card has had its rating read. */
+    val ratingsComplete: StateFlow<Boolean> = _ratingsComplete.asStateFlow()
 
     // Handles of HDR-PQ CR3 shots whose HEVC preview can't be decoded on Android (shown with an
     // "HDR" placeholder). See loadEmbeddedCr3Preview.
@@ -113,8 +122,10 @@ class MainViewModel @Inject constructor(
     fun onCameraDisconnected() {
         deviceManager.close()
         scannedFiles = emptyList()
+        thumbnailJob?.cancel()
         _thumbnails.value = emptyMap()
         _hdrHandles.value = emptySet()
+        _ratings.value = emptyMap()
         _state.value = TransferState.Idle
     }
 
@@ -179,9 +190,14 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    private var thumbnailJob: Job? = null
+
     private fun loadThumbnails(files: List<CameraFile>) {
+        thumbnailJob?.cancel()
         _hdrHandles.value = emptySet()
-        viewModelScope.launch {
+        _ratings.value = emptyMap()
+        _ratingsComplete.value = false
+        thumbnailJob = viewModelScope.launch {
             for (file in files) {
                 try {
                     // Primary: the camera's embedded MTP thumbnail.
@@ -196,7 +212,31 @@ class MainViewModel @Inject constructor(
                     android.util.Log.w("CR3Transfer", "Failed to load thumbnail for ${file.name}: ${e.message}")
                 }
             }
+            loadRatings(files)
         }
+    }
+
+    /**
+     * Star ratings sit in the RAW header (XMP / Exif 0x4746), so each needs its own header read. They run
+     * one at a time after the thumbnails rather than in parallel with them: MTP serialises requests
+     * anyway, and a burst of hundreds of reads only delays the thumbnails. Stops once the picker is
+     * left (e.g. a transfer started) so it never competes with the transfer.
+     */
+    private suspend fun loadRatings(files: List<CameraFile>) {
+        for (file in files) {
+            if (!file.fileType.isRaw) continue
+            if (_state.value !is TransferState.FilePicker) return
+            val rating = try {
+                withContext(Dispatchers.IO) {
+                    ThumbnailUtils.extractRating(deviceManager.readObjectHead(file.objectHandle, RATING_HEAD_READ_BYTES))
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CR3Transfer", "Rating read failed for ${file.name}: ${e.message}")
+                null
+            }
+            if (rating != null) _ratings.update { it + (file.objectHandle to rating) }
+        }
+        _ratingsComplete.value = true
     }
 
     /** Returns true if a usable thumbnail was stored from the MTP GetThumb operation. */
@@ -366,6 +406,15 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /** Select only [targetHandles] out of [visibleHandles], deselecting other visible handles. */
+    fun selectOnly(visibleHandles: Collection<Int>, targetHandles: Collection<Int>) {
+        val current = _state.value
+        if (current is TransferState.FilePicker) {
+            val newSelected = (current.selectedHandles - visibleHandles.toSet()) + targetHandles.toSet()
+            _state.value = current.copy(selectedHandles = newSelected)
+        }
+    }
+
     fun toggleDeleteAfterTransfer() {
         val current = _state.value as? TransferState.FilePicker ?: return
         _state.value = current.copy(deleteAfterTransfer = !current.deleteAfterTransfer)
@@ -431,5 +480,10 @@ class MainViewModel @Inject constructor(
         // A CR2 only needs its TIFF directories, which are grouped at the very start of the file
         // — the preview itself is fetched afterwards by the offset they give.
         private const val CR2_HEAD_READ_BYTES = 64 * 1024
+
+        // A CR3 keeps its XMP packet (with xmp:Rating) after the moov box, so its offset follows
+        // the size of the embedded THMB: 18–30 KB on an RP, 27–39 KB on an R50, 51–67 KB on an R8
+        // (measured) — 64 KB missed some R8 shots. A CR2 has its IFD0 Rating tag at the start.
+        private const val RATING_HEAD_READ_BYTES = 128 * 1024
     }
 }

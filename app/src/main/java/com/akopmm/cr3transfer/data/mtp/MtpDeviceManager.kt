@@ -106,11 +106,7 @@ class MtpDeviceManager @Inject constructor(
     }
 
     fun setCameraName(name: String?) {
-        cameraNameInternal = name
-            ?.trim()
-            ?.replace("[\\/:*?\"<>|]".toRegex(), "_")
-            ?.replace("\\s+".toRegex(), "_")
-            ?.takeIf { it.isNotBlank() }
+        cameraNameInternal = sanitizeFolderName(name)
     }
 
     private fun buildCameraId(device: UsbDevice): String {
@@ -119,15 +115,25 @@ class MtpDeviceManager @Inject constructor(
             ?: device.deviceName
             ?: "canon_${device.vendorId}_${device.productId}"
 
-        return rawId
-            .trim()
-            .replace("[\\/:*?\"<>|]".toRegex(), "_")
-            .replace("\\s+".toRegex(), "_")
-            .takeIf { it.isNotBlank() }
+        return sanitizeFolderName(rawId)
             ?: "camera_${device.vendorId}_${device.productId}"
     }
 
     companion object {
         const val CANON_VENDOR_ID = 0x04A9
+
+        /**
+         * Makes a camera serial or nickname safe as a folder name. Control characters are dropped —
+         * some bodies report a USB serial padded with NUL bytes, which broke importFile() — while
+         * characters that are illegal in file names become `_`, as before, so existing camera
+         * folders and saved nicknames keep their names (non-Latin letters and apostrophes stay).
+         */
+        fun sanitizeFolderName(input: String?): String? = input
+            ?.replace("\\s".toRegex(), " ")
+            ?.filterNot { it.isISOControl() }
+            ?.trim()
+            ?.replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+            ?.replace("\\s+".toRegex(), "_")
+            ?.takeIf { it.isNotBlank() }
     }
 }

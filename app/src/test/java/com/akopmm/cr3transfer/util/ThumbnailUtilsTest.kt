@@ -180,6 +180,108 @@ class ThumbnailUtilsTest {
         assertEquals(real.toList(), found?.toList())
     }
 
+    @Test
+    fun extractRating_parsesXmpRating() {
+        val xmpHeader = "<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?> <xmp:Rating>4</xmp:Rating> </xpacket>".toByteArray()
+        val rating = ThumbnailUtils.extractRating(xmpHeader)
+        assertEquals(4, rating)
+    }
+
+    @Test
+    fun extractRating_parsesXmpAttributeRating() {
+        val xmpHeader = "<x:xmpmeta><rdf:Description xmp:Rating=\"5\"/></x:xmpmeta>".toByteArray()
+        val rating = ThumbnailUtils.extractRating(xmpHeader)
+        assertEquals(5, rating)
+    }
+
+    @Test
+    fun extractRating_returnsNullWhenUnrated() {
+        val header = "<?xpacket begin=''?> <xmp:Rating>0</xmp:Rating>".toByteArray()
+        val rating = ThumbnailUtils.extractRating(header)
+        assertNull(rating)
+    }
+
+    @Test
+    fun extractRating_findsCanonXmpPacketDeepInACr3Header() {
+        // Layout of a real R8 CR3: ftyp/moov/THMB first, the XMP uuid box ~66 KB in.
+        val head = ByteArray(128 * 1024) { (it * 7).toByte() }
+        "ftypcrx ".toByteArray().copyInto(head, 4)
+        canonXmp(3).copyInto(head, 66_066)
+        assertEquals(3, ThumbnailUtils.extractRating(head))
+    }
+
+    @Test
+    fun extractRating_unratedCanonXmpPacketIsNull() {
+        val head = ByteArray(40_000)
+        canonXmp(0).copyInto(head, 24_021)
+        assertNull(ThumbnailUtils.extractRating(head))
+    }
+
+    @Test
+    fun extractRating_singleQuotedXmpAttribute() {
+        assertEquals(2, ThumbnailUtils.extractRating("<rdf:Description xmp:Rating='2'/>".toByteArray()))
+    }
+
+    @Test
+    fun extractRating_rejectedRatingIsNotAStar() {
+        // Lightroom writes -1 for "rejected"; that must not read as 1 star.
+        assertNull(ThumbnailUtils.extractRating("<xmp:Rating>-1</xmp:Rating>".toByteArray()))
+    }
+
+    @Test
+    fun extractRating_exifRatingLittleEndian() {
+        // IFD entry: tag 0x4746, type SHORT (3), count 1, value 4 (CR2 / CR3 CMT1 are "II").
+        val head = ByteArray(256)
+        byteArrayOf(0x46, 0x47, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00).copyInto(head, 100)
+        assertEquals(4, ThumbnailUtils.extractRating(head))
+    }
+
+    @Test
+    fun extractRating_exifRatingBigEndian() {
+        val head = ByteArray(256)
+        byteArrayOf(0x47, 0x46, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x05).copyInto(head, 100)
+        assertEquals(5, ThumbnailUtils.extractRating(head))
+    }
+
+    @Test
+    fun extractRating_exifRatingAtTheVeryEndOfTheBuffer() {
+        val entry = byteArrayOf(0x46, 0x47, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00)
+        val head = ByteArray(64) + entry
+        assertEquals(2, ThumbnailUtils.extractRating(head))
+    }
+
+    @Test
+    fun extractRating_exifZeroOrOutOfRangeIsNull() {
+        val zero = ByteArray(32).also {
+            byteArrayOf(0x46, 0x47, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00).copyInto(it, 4)
+        }
+        val six = ByteArray(32).also {
+            byteArrayOf(0x46, 0x47, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x00).copyInto(it, 4)
+        }
+        assertNull(ThumbnailUtils.extractRating(zero))
+        assertNull(ThumbnailUtils.extractRating(six))
+    }
+
+    @Test
+    fun extractRating_xmpZeroFallsBackToExif() {
+        val head = "<xmp:Rating>0</xmp:Rating>".toByteArray() +
+            byteArrayOf(0x46, 0x47, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x03, 0x00)
+        assertEquals(3, ThumbnailUtils.extractRating(head))
+    }
+
+    @Test
+    fun extractRating_nullOrTinyInputIsNull() {
+        assertNull(ThumbnailUtils.extractRating(null))
+        assertNull(ThumbnailUtils.extractRating(ByteArray(4)))
+        assertNull(ThumbnailUtils.extractRating(ByteArray(0)))
+    }
+
+    /** The XMP packet exactly as an EOS R8 / R50 / RP writes it into the CR3 header. */
+    private fun canonXmp(rating: Int): ByteArray =
+        ("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">" +
+            "<rdf:Description rdf:about=\"\" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\">" +
+            "<xmp:Rating>$rating</xmp:Rating></rdf:Description></rdf:RDF></x:xmpmeta>").toByteArray()
+
     /** A minimal FF D8 FF … FF D9 run of [size] bytes, tagged with [marker] for identification. */
     private fun jpeg(size: Int, marker: Int): ByteArray {
         val bytes = ByteArray(size)

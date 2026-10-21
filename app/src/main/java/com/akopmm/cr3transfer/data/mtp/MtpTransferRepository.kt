@@ -107,6 +107,11 @@ class MtpTransferRepository @Inject constructor(
 
             val success = withContext(Dispatchers.IO) {
                 try {
+                    if (!destDir.exists()) destDir.mkdirs()
+                    if (!destDir.isDirectory) {
+                        Log.e(TAG, "Destination directory could not be created: ${destDir.absolutePath}")
+                        return@withContext false
+                    }
                     Log.d(TAG, "Importing ${file.name} (handle=0x${file.objectHandle.toString(16)}) to ${destFile.absolutePath}")
                     val imported = device.importFile(file.objectHandle, destFile.absolutePath)
                     Log.d(TAG, "importFile returned: $imported, file exists: ${destFile.exists()}, size: ${destFile.length()}")

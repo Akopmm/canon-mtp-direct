@@ -29,8 +29,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +64,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -92,6 +97,8 @@ fun MainScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val thumbnails by viewModel.thumbnails.collectAsState()
+    val ratings by viewModel.ratings.collectAsState()
+    val ratingsComplete by viewModel.ratingsComplete.collectAsState()
     val hdrHandles by viewModel.hdrHandles.collectAsState()
     val showHistory by viewModel.showHistory.collectAsState()
     val sessionHistory by viewModel.sessionHistory.collectAsState()
@@ -123,10 +130,13 @@ fun MainScreen(
                 is TransferState.FilePicker -> FilePickerContent(
                     state = currentState,
                     thumbnails = thumbnails,
+                    ratings = ratings,
+                    ratingsComplete = ratingsComplete,
                     hdrHandles = hdrHandles,
                     onToggleFile = { viewModel.toggleFileSelection(it) },
                     onSelectAll = { viewModel.selectHandles(it) },
                     onSelectNone = { viewModel.deselectHandles(it) },
+                    onSelectOnly = { visible, target -> viewModel.selectOnly(visible, target) },
                     onToggleDeleteMode = { viewModel.toggleDeleteAfterTransfer() },
                     onStartTransfer = {
                         if (viewModel.checkStorageAndProceed()) onStartTransfer()
@@ -297,23 +307,43 @@ private enum class PickerSort(val label: String, val comparator: Comparator<Came
 private fun FilePickerContent(
     state: TransferState.FilePicker,
     thumbnails: Map<Int, ByteArray>,
+    ratings: Map<Int, Int>,
+    ratingsComplete: Boolean,
     hdrHandles: Set<Int>,
     onToggleFile: (Int) -> Unit,
-    onSelectAll: (List<Int>) -> Unit,
+    onSelectAll: (Collection<Int>) -> Unit,
     onSelectNone: (List<Int>) -> Unit,
+    onSelectOnly: (Collection<Int>, Collection<Int>) -> Unit,
     onToggleDeleteMode: () -> Unit,
     onStartTransfer: () -> Unit,
 ) {
+    val context = LocalContext.current
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var sort by remember { mutableStateOf(PickerSort.NEWEST_FIRST) }
     var hiddenTypes by remember { mutableStateOf(emptySet<FileType>()) }
+    var starredOnly by remember { mutableStateOf(false) }
+    // Starred handles already selected for the user while the filter is on, so ratings that arrive
+    // later are added once without re-selecting shots the user deliberately unticked.
+    var autoSelectedStarred by remember { mutableStateOf(emptySet<Int>()) }
+    LaunchedEffect(ratings, starredOnly) {
+        if (!starredOnly) return@LaunchedEffect
+        val newlyRated = starredHandles(state.files, ratings, hiddenTypes) - autoSelectedStarred
+        if (newlyRated.isNotEmpty()) {
+            autoSelectedStarred = autoSelectedStarred + newlyRated
+            onSelectAll(newlyRated)
+        }
+    }
+    var infoFile by remember { mutableStateOf<Pair<CameraFile, Int?>?>(null) }
 
     // Only offer filtering for the types this camera actually gave us.
     val availableTypes = remember(state.files) {
         state.files.map { it.fileType }.distinct().sortedBy { it.ordinal }
     }
-    val visibleFiles = remember(state.files, sort, hiddenTypes) {
-        state.files.filterNot { it.fileType in hiddenTypes }.sortedWith(sort.comparator)
+    val visibleFiles = remember(state.files, sort, hiddenTypes, starredOnly, ratings) {
+        state.files
+            .filterNot { it.fileType in hiddenTypes }
+            .filter { !starredOnly || (ratings[it.objectHandle] ?: 0) > 0 }
+            .sortedWith(sort.comparator)
     }
     val visibleHandles = remember(visibleFiles) { visibleFiles.map { it.objectHandle } }
 
@@ -338,6 +368,14 @@ private fun FilePickerContent(
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
             },
+        )
+    }
+
+    infoFile?.let { (file, rating) ->
+        FileInfoDialog(
+            file = file,
+            rating = rating,
+            onDismiss = { infoFile = null },
         )
     }
 
@@ -378,8 +416,26 @@ private fun FilePickerContent(
                     }
                 }
             }
+            Spacer(modifier = Modifier.width(4.dp))
+            FilterChip(
+                selected = starredOnly,
+                onClick = {
+                    starredOnly = !starredOnly
+                    if (starredOnly) {
+                        // "Starred" means "import my picks": select exactly the starred shots, so
+                        // unstarred files hidden by the filter don't silently transfer as well.
+                        val starred = starredHandles(state.files, ratings, hiddenTypes)
+                        autoSelectedStarred = starred
+                        if (starred.isEmpty() && ratingsComplete) {
+                            Toast.makeText(context, "No starred files on the card", Toast.LENGTH_SHORT).show()
+                        }
+                        onSelectOnly(state.files.map { it.objectHandle }, starred)
+                    }
+                },
+                label = { Text(if (ratingsComplete) "★ Starred" else "★ Starred…") },
+                modifier = Modifier.padding(end = 4.dp),
+            )
             if (availableTypes.size > 1) {
-                Spacer(modifier = Modifier.width(8.dp))
                 availableTypes.forEach { type ->
                     FilterChip(
                         selected = type !in hiddenTypes,
@@ -437,9 +493,11 @@ private fun FilePickerContent(
                 FileThumbnail(
                     file = file,
                     thumbnailData = thumbnails[file.objectHandle],
+                    rating = ratings[file.objectHandle],
                     isHdr = file.objectHandle in hdrHandles,
                     isSelected = file.objectHandle in state.selectedHandles,
                     onClick = { onToggleFile(file.objectHandle) },
+                    onShowInfo = { infoFile = Pair(file, ratings[file.objectHandle]) },
                 )
             }
         }
@@ -462,9 +520,11 @@ private fun FilePickerContent(
 private fun FileThumbnail(
     file: CameraFile,
     thumbnailData: ByteArray?,
+    rating: Int?,
     isHdr: Boolean,
     isSelected: Boolean,
     onClick: () -> Unit,
+    onShowInfo: () -> Unit,
 ) {
     val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
     val borderWidth = if (isSelected) 3.dp else 0.dp
@@ -517,7 +577,32 @@ private fun FileThumbnail(
             )
         }
 
-        // Selection indicator
+        // Star rating badge overlay at top-left
+        if (rating != null && rating > 0) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Star,
+                    contentDescription = "Rating $rating stars",
+                    tint = Color(0xFFFFD700),
+                    modifier = Modifier.size(12.dp),
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                Text(
+                    text = "$rating",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                )
+            }
+        }
+
+        // Selection indicator at top-right
         if (isSelected) {
             Icon(
                 imageVector = Icons.Filled.CheckCircle,
@@ -531,6 +616,23 @@ private fun FileThumbnail(
             )
         }
 
+        // Info icon button at bottom-right
+        IconButton(
+            onClick = onShowInfo,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(2.dp)
+                .size(24.dp)
+                .background(Color.Black.copy(alpha = 0.5f), CircleShape),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Info,
+                contentDescription = "File Info",
+                tint = Color.White,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+
         // Filename at bottom
         Text(
             text = file.name,
@@ -541,6 +643,7 @@ private fun FileThumbnail(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
+                .padding(end = 26.dp)
                 .background(Color.Black.copy(alpha = 0.5f))
                 .padding(2.dp),
             textAlign = TextAlign.Center,
@@ -668,6 +771,79 @@ private fun DoneContent(state: TransferState.Done) {
             },
         )
     }
+}
+
+@Composable
+private fun FileInfoDialog(
+    file: CameraFile,
+    rating: Int?,
+    onDismiss: () -> Unit,
+) {
+    val dateStr = remember(file.dateCreated) {
+        if (file.dateCreated > 0) {
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(file.dateCreated))
+        } else "Unknown"
+    }
+    val sizeMbStr = remember(file.sizeBytes) {
+        String.format(Locale.getDefault(), "%.2f MB (%d bytes)", file.sizeBytes / (1024.0 * 1024.0), file.sizeBytes)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Image File Information") },
+        text = {
+            Column {
+                Text("Filename:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(file.name, style = MaterialTheme.typography.bodyLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("File Type:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = "${file.fileType.name} (${when (file.fileType) {
+                        FileType.CR3 -> "Canon RAW 3"
+                        FileType.CR2 -> "Canon RAW 2"
+                        FileType.JPG -> "JPEG Image"
+                        FileType.HEIF -> "HEIF Image"
+                        FileType.MP4 -> "MP4 Video"
+                        FileType.MOV -> "QuickTime Video"
+                    }})",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("File Size:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(sizeMbStr, style = MaterialTheme.typography.bodyMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("Capture Date:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(dateStr, style = MaterialTheme.typography.bodyMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("Camera Rating:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (rating != null && rating > 0) {
+                        for (star in 1..5) {
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = null,
+                                tint = if (star <= rating) Color(0xFFFFD700) else MaterialTheme.colorScheme.outlineVariant,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("$rating / 5 Stars", style = MaterialTheme.typography.bodyMedium)
+                    } else {
+                        Text("Unrated", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
 }
 
 @Composable
@@ -837,3 +1013,10 @@ private fun FolderPickerDialog(
         },
     )
 }
+
+/** Handles of starred (1–5 ★) files whose type isn't filtered out. */
+private fun starredHandles(files: List<CameraFile>, ratings: Map<Int, Int>, hiddenTypes: Set<FileType>): Set<Int> =
+    files.asSequence()
+        .filter { it.fileType !in hiddenTypes && (ratings[it.objectHandle] ?: 0) > 0 }
+        .map { it.objectHandle }
+        .toSet()
