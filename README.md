@@ -36,6 +36,7 @@ This app talks to the camera **directly over MTP**, so it never touches that pic
 | ℹ️ **File details** | Tap ⓘ on a thumbnail for name, format, size, capture time and rating. |
 | 🖼️ **Real thumbnails** | Embedded previews pulled straight from the RAW files — CR3 and CR2 alike. |
 | 🧩 **Old bodies too** | CR3/MP4 from Digic 8 and newer; CR2/MOV from the DSLRs before them. |
+| 📁 **Choose where imports go** | DCIM, Pictures or any folder on the phone, grouped by camera and by the day of import or the day the shot was taken. |
 | 🧠 **Smart dedup** | Skips what you already transferred — per camera, checked against files on disk, survives a reinstall. |
 | 📤 **Send to Immich** | Hands transferred RAWs to the Immich app, which uploads them to your own server. |
 | 🎨 **Lightroom import** | Send one date folder or several, with or without the camera connected. |
